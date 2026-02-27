@@ -47,22 +47,12 @@ def _os_notify(stats: RunStats) -> None:
         + (f"Saved {savings}." if stats.bytes_saved > 0 else "")
     ).strip()
 
+    # macOS: osascript is always available and needs no extra deps.
+    # plyer on macOS requires pyobjus which is not installed by default and
+    # prints its own traceback to stderr before raising — skip it entirely.
     try:
-        from plyer import notification  # type: ignore
-        notification.notify(
-            title=title,
-            message=body,
-            app_name="gphotos-uploader",
-            timeout=10,
-        )
-        return
-    except Exception:
-        pass
-
-    # Fallback: macOS osascript
-    try:
-        import subprocess, shutil
-        if shutil.which("osascript"):
+        import subprocess, shutil, platform
+        if platform.system() == "Darwin" and shutil.which("osascript"):
             safe_body = body.replace('"', "'")
             subprocess.run(
                 ["osascript", "-e",
@@ -73,13 +63,29 @@ def _os_notify(stats: RunStats) -> None:
     except Exception:
         pass
 
-    # Fallback: Linux notify-send
+    # Linux: notify-send
     try:
         import subprocess, shutil
         if shutil.which("notify-send"):
             subprocess.run(
                 ["notify-send", title, body],
                 check=False, capture_output=True, timeout=5,
+            )
+            return
+    except Exception:
+        pass
+
+    # Windows / last resort: plyer.
+    # Suppress stderr to swallow any internal plyer import tracebacks.
+    try:
+        import contextlib, io
+        from plyer import notification  # type: ignore
+        with contextlib.redirect_stderr(io.StringIO()):
+            notification.notify(
+                title=title,
+                message=body,
+                app_name="gphotos-uploader",
+                timeout=10,
             )
     except Exception:
         pass
