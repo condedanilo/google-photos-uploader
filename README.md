@@ -27,6 +27,23 @@ cd google-photos-uploader
 uv sync
 ```
 
+After `uv sync`, the `gphotos` command is available in two ways:
+
+**Option A — prefix with `uv run` (no activation needed):**
+```bash
+uv run gphotos auth login
+uv run gphotos upload /path/to/photos
+```
+
+**Option B — activate the virtual environment:**
+```bash
+source .venv/bin/activate   # macOS / Linux
+# .venv\Scripts\activate    # Windows
+
+gphotos auth login           # works directly while venv is active
+deactivate                   # when done
+```
+
 ### Linux — HEIC support
 
 HEIC files require `libheif` on Linux:
