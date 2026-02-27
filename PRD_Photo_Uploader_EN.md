@@ -91,8 +91,13 @@ Single user (the developer themselves), with enough technical knowledge to run a
 ### 7.2 Image Compression
 
 - Photos must be compressed locally before upload to save storage space in Google Photos
-- Compression should be equivalent to Google Photos' "Storage saver" quality mode
 - Compression behavior must be configurable (enable/disable)
+- The user must be able to choose a compression level:
+  - **low** — JPEG quality 92; light compression, ~30-40% smaller, virtually no visible quality loss
+  - **mid** — JPEG quality 85; equivalent to Google Photos' "Storage saver" mode **(default)**
+  - **high** — JPEG quality 60; aggressive compression, ~70-80% smaller, slight quality loss on close inspection
+- If the compressed output is larger than the original, the original must be uploaded instead
+- EXIF metadata (capture date/time, GPS coordinates) must be preserved during compression so Google Photos correctly dates and locates the photo
 
 ### 7.3 State Persistence
 
@@ -120,10 +125,12 @@ During execution, the tool must display in real time:
 - Completion percentage
 - Elapsed time and estimated time remaining
 - Upload rate (files per minute)
+- Running compression savings: total original size vs. uploaded size and bytes saved (e.g. "Saved 9.4 GB (57%)")
 
 At the end of execution (or when interrupted), it must generate a report with:
 
 - General summary (totals above)
+- Compression summary: original total size → uploaded total size → bytes saved → compression ratio, with the level used (e.g. "mid, q=85")
 - List of failed files with the reason for each error
 
 ### 7.6 Authentication
@@ -214,7 +221,7 @@ Continue? [Y/n]
 - **Portability:** must run on macOS, Linux, and Windows without modification
 - **Reliability:** must not lose state even in the event of an abrupt shutdown (e.g. Ctrl+C) or system hibernation
 - **Performance and Parallelism:** file bytes can be uploaded in parallel with a configurable number of workers (e.g. 4, 6 threads). The `batchCreate` call must be serialized due to API limitations. The system must respect Google Photos rate limits
-- **Configurability:** parameters such as number of retries, parallel workers, and compression must be adjustable via configuration file or flags
+- **Configurability:** parameters such as number of retries, parallel workers, compression (enable/disable), and compression level (low/mid/high) must be adjustable via configuration file or flags
 - **Security:** credentials and tokens must never be logged or exposed; the OAuth scope must be the minimum necessary (`photoslibrary.appendonly`)
 - **Modularity:** the upload core must be implemented as an independent library, decoupled from the CLI interface, enabling reuse in future interfaces (web, desktop)
 - **Distributability:** technical decisions should account for the possibility of future public distribution — choose a language/runtime with a good packaging story, avoid hard-to-replicate environment dependencies, and always keep credentials separate from code

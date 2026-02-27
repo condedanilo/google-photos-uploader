@@ -1,0 +1,69 @@
+# Google Photos Uploader — Configuration File
+# Copy this file to uploader.toml and edit it.
+# CLI flags always override values set here.
+#
+# Discovery order (highest priority first):
+#   1. CLI flags
+#   2. Environment variables (GPHOTOS_*)
+#   3. uploader.toml in the current directory
+#   4. ~/.config/gphotos-uploader/uploader.toml
+#   5. These built-in defaults
+
+[paths]
+# Path to the OAuth client_secret.json downloaded from Google Cloud Console.
+# See README.md for instructions on how to create one.
+credentials = "~/.config/gphotos-uploader/client_secret.json"
+
+# Where to persist the OAuth access token (created automatically after first login).
+token = "~/.config/gphotos-uploader/token.json"
+
+# Where to store the SQLite upload state database (created automatically).
+state_db = "~/.local/share/gphotos-uploader/state.db"
+
+[upload]
+# Number of parallel worker threads for byte uploads.
+# Google Photos allows parallel byte uploads; batchCreate is always serialized.
+workers = 4
+
+# Maximum items per batchCreate call. The API hard limit is 50.
+batch_size = 50
+
+# Maximum retry attempts per file before marking it as an error.
+max_retries = 3
+
+# Base delay (seconds) for exponential backoff.
+# Formula: base_delay * 2^attempt + random_jitter
+retry_base_delay = 2.0
+
+# Action when the daily API quota is exhausted.
+# "exit" — save state, print an actionable message, and exit cleanly.
+on_quota_exhausted = "exit"
+
+[compression]
+# Enable local compression before upload.
+# Recommended: reduces Google Photos storage usage significantly.
+enabled = true
+
+# Compression aggressiveness:
+#   "low"  — JPEG quality 92, ~30-40% smaller, virtually no visible difference
+#   "mid"  — JPEG quality 85, Google "Storage Saver" equivalent (default)
+#   "high" — JPEG quality 60, ~70-80% smaller, slight quality loss on close inspection
+level = "mid"
+
+# If the compressed file is larger than the original, upload the original instead.
+skip_if_larger = true
+
+[notifications]
+# Emit an OS desktop notification when the upload run completes.
+enabled = true
+
+# Emit a terminal beep (ASCII bell) on completion.
+beep = true
+
+[scan]
+# Follow symbolic links during directory scan.
+follow_symlinks = false
+
+# Restrict upload to specific extensions.
+# Defaults to all Google Photos supported types when commented out.
+# include_extensions = [".jpg", ".jpeg", ".png", ".heic", ".mp4", ".mov"]

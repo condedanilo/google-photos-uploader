@@ -1,0 +1,268 @@
+"""Configuration loading with a clear precedence chain.
+
+Precedence (highest → lowest):
+  1. CLI flags (passed as keyword arguments to load())
+  2. Environment variables  (GPHOTOS_*)
+  3. uploader.toml in the current working directory
+  4. ~/.config/gphotos-uploader/uploader.toml
+  5. Built-in defaults
+"""
+from __future__ import annotations
+
+import os
+import tomllib
+from dataclasses import dataclass, field, replace
+from pathlib import Path
+from typing import Optional
+
+from uploader.errors import ConfigError
+from uploader.models import CompressionLevel
+
+
+# ---------------------------------------------------------------------------
+# AppConfig — immutable, fully-resolved configuration
+# ---------------------------------------------------------------------------
+
+@dataclass(frozen=True)
+class AppConfig:
+    # Paths
+    credentials_path: Path   # client_secret.json from Google Cloud Console
+    token_path: Path         # persisted OAuth token
+    state_db_path: Path      # SQLite state database
+
+    # Upload behaviour
+    workers: int             # parallel byte-upload threads
+    batch_size: int          # items per batchCreate call (API max: 50)
+    max_retries: int         # per-file retry attempts before marking ERROR
+    retry_base_delay: float  # seconds; formula: base * 2^attempt + jitter
+
+    # Error handling
+    on_quota_exhausted: str  # "exit" (v1 only)
+
+    # Compression
+    compress: bool
+    compression_level: CompressionLevel
+    skip_if_larger: bool     # use original if compressed file is bigger
+
+    # Notifications
+    notify_on_complete: bool
+    beep_on_complete: bool
+
+    # Scan
+    follow_symlinks: bool
+    include_extensions: Optional[frozenset[str]]  # None = all supported types
+
+
+# ---------------------------------------------------------------------------
+# Default values
+# ---------------------------------------------------------------------------
+
+_DEFAULT_CONFIG_PATHS = [
+    Path.cwd() / "uploader.toml",
+    Path.home() / ".config" / "gphotos-uploader" / "uploader.toml",
+]
+
+_DEFAULTS: dict = {
+    "paths": {
+        "credentials": str(Path.home() / ".config" / "gphotos-uploader" / "client_secret.json"),
+        "token":       str(Path.home() / ".config" / "gphotos-uploader" / "token.json"),
+        "state_db":    str(Path.home() / ".local" / "share" / "gphotos-uploader" / "state.db"),
+    },
+    "upload": {
+        "workers":           4,
+        "batch_size":        50,
+        "max_retries":       3,
+        "retry_base_delay":  2.0,
+        "on_quota_exhausted": "exit",
+    },
+    "compression": {
+        "enabled":       True,
+        "level":         "mid",
+        "skip_if_larger": True,
+    },
+    "notifications": {
+        "enabled": True,
+        "beep":    True,
+    },
+    "scan": {
+        "follow_symlinks":    False,
+        "include_extensions": None,
+    },
+}
+
+
+# ---------------------------------------------------------------------------
+# Public loader
+# ---------------------------------------------------------------------------
+
+def load(
+    config_file: Optional[Path] = None,
+    *,
+    # CLI overrides (None means "not set by user")
+    workers: Optional[int] = None,
+    compress: Optional[bool] = None,
+    compression_level: Optional[str] = None,
+    max_retries: Optional[int] = None,
+    credentials_path: Optional[Path] = None,
+    token_path: Optional[Path] = None,
+    state_db_path: Optional[Path] = None,
+) -> AppConfig:
+    """Load and merge configuration from all sources, returning an AppConfig."""
+
+    # 1. Load TOML file (first found wins)
+    toml_data = _load_toml(config_file)
+
+    # 2. Deep-merge with defaults (defaults are the base, toml overrides)
+    merged = _deep_merge(_DEFAULTS, toml_data)
+
+    # 3. Apply environment variable overrides
+    merged = _apply_env(merged)
+
+    # 4. Build the config object
+    cfg = _build(merged)
+
+    # 5. Apply CLI overrides (highest priority)
+    overrides: dict = {}
+    if workers is not None:
+        overrides["workers"] = workers
+    if compress is not None:
+        overrides["compress"] = compress
+    if compression_level is not None:
+        overrides["compression_level"] = _parse_compression_level(compression_level)
+    if max_retries is not None:
+        overrides["max_retries"] = max_retries
+    if credentials_path is not None:
+        overrides["credentials_path"] = credentials_path
+    if token_path is not None:
+        overrides["token_path"] = token_path
+    if state_db_path is not None:
+        overrides["state_db_path"] = state_db_path
+
+    if overrides:
+        cfg = replace(cfg, **overrides)
+
+    _validate(cfg)
+    return cfg
+
+
+# ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+def _load_toml(explicit_path: Optional[Path]) -> dict:
+    candidates = [explicit_path] if explicit_path else _DEFAULT_CONFIG_PATHS
+    for path in candidates:
+        if path and path.exists():
+            try:
+                with open(path, "rb") as f:
+                    return tomllib.load(f)
+            except tomllib.TOMLDecodeError as e:
+                raise ConfigError(f"Invalid TOML in {path}: {e}") from e
+    return {}
+
+
+def _deep_merge(base: dict, override: dict) -> dict:
+    """Recursively merge override into base (non-destructive copy)."""
+    result = dict(base)
+    for key, value in override.items():
+        if key in result and isinstance(result[key], dict) and isinstance(value, dict):
+            result[key] = _deep_merge(result[key], value)
+        else:
+            result[key] = value
+    return result
+
+
+def _apply_env(merged: dict) -> dict:
+    """Apply GPHOTOS_* environment variable overrides."""
+    env_map = {
+        "GPHOTOS_CREDENTIALS": ("paths", "credentials"),
+        "GPHOTOS_TOKEN":       ("paths", "token"),
+        "GPHOTOS_STATE_DB":    ("paths", "state_db"),
+        "GPHOTOS_WORKERS":     ("upload", "workers"),
+        "GPHOTOS_MAX_RETRIES": ("upload", "max_retries"),
+        "GPHOTOS_COMPRESS":    ("compression", "enabled"),
+        "GPHOTOS_COMPRESSION_LEVEL": ("compression", "level"),
+    }
+    result = _deep_merge(merged, {})  # shallow copy at top level
+    for env_var, (section, key) in env_map.items():
+        value = os.environ.get(env_var)
+        if value is not None:
+            if section not in result:
+                result[section] = {}
+            # Type coercion for numeric/bool values
+            if key in ("workers", "max_retries", "batch_size"):
+                try:
+                    result[section][key] = int(value)
+                except ValueError:
+                    raise ConfigError(f"Environment variable {env_var} must be an integer, got: {value!r}")
+            elif key == "enabled":
+                result[section][key] = value.lower() in ("1", "true", "yes")
+            else:
+                result[section][key] = value
+    return result
+
+
+def _build(d: dict) -> AppConfig:
+    """Construct AppConfig from the merged dict, with type coercion."""
+    p = d.get("paths", {})
+    u = d.get("upload", {})
+    c = d.get("compression", {})
+    n = d.get("notifications", {})
+    s = d.get("scan", {})
+
+    raw_extensions = s.get("include_extensions")
+    include_extensions: Optional[frozenset[str]] = None
+    if raw_extensions:
+        include_extensions = frozenset(
+            ext if ext.startswith(".") else f".{ext}"
+            for ext in raw_extensions
+        )
+
+    return AppConfig(
+        credentials_path   = _expand(p.get("credentials", _DEFAULTS["paths"]["credentials"])),
+        token_path         = _expand(p.get("token", _DEFAULTS["paths"]["token"])),
+        state_db_path      = _expand(p.get("state_db", _DEFAULTS["paths"]["state_db"])),
+
+        workers            = int(u.get("workers", 4)),
+        batch_size         = min(int(u.get("batch_size", 50)), 50),  # API hard limit
+        max_retries        = int(u.get("max_retries", 3)),
+        retry_base_delay   = float(u.get("retry_base_delay", 2.0)),
+        on_quota_exhausted = str(u.get("on_quota_exhausted", "exit")),
+
+        compress           = bool(c.get("enabled", True)),
+        compression_level  = _parse_compression_level(c.get("level", "mid")),
+        skip_if_larger     = bool(c.get("skip_if_larger", True)),
+
+        notify_on_complete = bool(n.get("enabled", True)),
+        beep_on_complete   = bool(n.get("beep", True)),
+
+        follow_symlinks    = bool(s.get("follow_symlinks", False)),
+        include_extensions = include_extensions,
+    )
+
+
+def _parse_compression_level(value: str) -> CompressionLevel:
+    try:
+        return CompressionLevel(value.lower())
+    except ValueError:
+        valid = ", ".join(v.value for v in CompressionLevel)
+        raise ConfigError(
+            f"Invalid compression level {value!r}. Must be one of: {valid}"
+        )
+
+
+def _expand(path_str: str) -> Path:
+    return Path(os.path.expandvars(path_str)).expanduser()
+
+
+def _validate(cfg: AppConfig) -> None:
+    if cfg.workers < 1:
+        raise ConfigError("workers must be at least 1")
+    if cfg.max_retries < 0:
+        raise ConfigError("max_retries must be >= 0")
+    if cfg.batch_size < 1 or cfg.batch_size > 50:
+        raise ConfigError("batch_size must be between 1 and 50")
+    if cfg.retry_base_delay < 0:
+        raise ConfigError("retry_base_delay must be >= 0")
+    if cfg.on_quota_exhausted not in ("exit",):
+        raise ConfigError(f"on_quota_exhausted must be 'exit', got: {cfg.on_quota_exhausted!r}")
