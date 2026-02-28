@@ -26,6 +26,11 @@ def login(
     from uploader.config import load as load_config
     from uploader.errors import AuthError, ConfigError
 
+    from uploader.config import ensure_user_config
+    created = ensure_user_config()
+    if created:
+        console.print(f"[dim]Created default config → {created}[/dim]")
+
     try:
         config = load_config(
             credentials_path=credentials,
@@ -39,11 +44,8 @@ def login(
     tok_path = token_out or config.token_path
 
     if not creds_path.exists():
-        console.print(
-            f"[red]Error:[/red] Credentials file not found: {creds_path}\n"
-            "Download client_secret.json from Google Cloud Console.\n"
-            "See README.md for setup instructions."
-        )
+        from cli.display import print_credentials_setup_panel
+        print_credentials_setup_panel(creds_path)
         raise typer.Exit(1)
 
     console.print("[cyan]Opening browser for Google authentication...[/cyan]")

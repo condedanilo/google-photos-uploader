@@ -60,10 +60,84 @@ class AppConfig:
 # Default values
 # ---------------------------------------------------------------------------
 
+# Standard user-level config location. Exposed publicly so CLI commands can
+# display it without duplicating the path.
+USER_CONFIG_PATH = Path.home() / ".config" / "gphotos-uploader" / "uploader.toml"
+
 _DEFAULT_CONFIG_PATHS = [
     Path.cwd() / "uploader.toml",
-    Path.home() / ".config" / "gphotos-uploader" / "uploader.toml",
+    USER_CONFIG_PATH,
 ]
+
+# Content written to USER_CONFIG_PATH on first run. Mirrors uploader.example.toml
+# but is embedded here so it works after `pip install` (no repo checkout needed).
+_DEFAULT_CONFIG_CONTENT = """\
+# Google Photos Uploader — Configuration File
+# Edit this file to customise the tool's behaviour.
+# CLI flags always override values set here.
+#
+# Discovery order (highest priority first):
+#   1. CLI flags
+#   2. Environment variables (GPHOTOS_*)
+#   3. uploader.toml in the current directory
+#   4. ~/.config/gphotos-uploader/uploader.toml  ← this file
+#   5. Built-in defaults
+
+[paths]
+# Path to the OAuth client_secret.json downloaded from Google Cloud Console.
+credentials = "~/.config/gphotos-uploader/client_secret.json"
+
+# Where to persist the OAuth access token (created automatically after first login).
+token = "~/.config/gphotos-uploader/token.json"
+
+# Where to store the SQLite upload state database (created automatically).
+state_db = "~/.local/share/gphotos-uploader/state.db"
+
+[upload]
+# Number of parallel worker threads for byte uploads.
+workers = 4
+
+# Maximum items per batchCreate call. The API hard limit is 50.
+batch_size = 50
+
+# Maximum retry attempts per file before marking it as an error.
+max_retries = 3
+
+# Base delay (seconds) for exponential backoff.
+# Formula: base_delay * 2^attempt + random_jitter
+retry_base_delay = 2.0
+
+# Action when the daily API quota is exhausted.
+on_quota_exhausted = "exit"
+
+[compression]
+# Enable local compression before upload. Reduces Google Photos storage usage.
+enabled = true
+
+# Compression aggressiveness:
+#   "low"  — JPEG quality 92, ~30-40% smaller, virtually no visible difference
+#   "mid"  — JPEG quality 85, Google "Storage Saver" equivalent (default)
+#   "high" — JPEG quality 60, ~70-80% smaller, slight quality loss on close inspection
+level = "mid"
+
+# If the compressed file is larger than the original, upload the original instead.
+skip_if_larger = true
+
+[notifications]
+# Emit an OS desktop notification when the upload run completes.
+enabled = true
+
+# Emit a terminal beep (ASCII bell) on completion.
+beep = true
+
+[scan]
+# Follow symbolic links during directory scan.
+follow_symlinks = false
+
+# Restrict upload to specific extensions.
+# Defaults to all Google Photos supported types when commented out.
+# include_extensions = [".jpg", ".jpeg", ".png", ".heic", ".mp4", ".mov"]
+"""
 
 _DEFAULTS: dict = {
     "paths": {
@@ -262,6 +336,22 @@ def _parse_compression_level(value: str) -> CompressionLevel:
 
 def _expand(path_str: str) -> Path:
     return Path(os.path.expandvars(path_str)).expanduser()
+
+
+def ensure_user_config() -> Path | None:
+    """Create the default user config at USER_CONFIG_PATH if it doesn't exist.
+
+    Returns the path to the newly created file, or None if it already existed
+    or a local uploader.toml in the current directory was found (in which case
+    the user is intentionally using a local config and we leave it alone).
+    """
+    if USER_CONFIG_PATH.exists():
+        return None
+    if (Path.cwd() / "uploader.toml").exists():
+        return None
+    USER_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    USER_CONFIG_PATH.write_text(_DEFAULT_CONFIG_CONTENT, encoding="utf-8")
+    return USER_CONFIG_PATH
 
 
 def _validate(cfg: AppConfig) -> None:
