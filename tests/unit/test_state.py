@@ -197,6 +197,35 @@ class TestGetStats:
 # Thread safety
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# Meta key/value store
+# ---------------------------------------------------------------------------
+
+class TestMeta:
+    def test_get_missing_key_returns_none(self, store: StateStore):
+        assert store.get_meta("album_id") is None
+
+    def test_set_and_get_roundtrip(self, store: StateStore):
+        store.set_meta("album_id", "album-abc-123")
+        assert store.get_meta("album_id") == "album-abc-123"
+
+    def test_set_overwrites_existing_value(self, store: StateStore):
+        store.set_meta("album_id", "first")
+        store.set_meta("album_id", "second")
+        assert store.get_meta("album_id") == "second"
+
+    def test_clear_all_removes_meta(self, store: StateStore):
+        store.set_meta("album_id", "album-abc-123")
+        store.clear_all()
+        assert store.get_meta("album_id") is None
+
+    def test_multiple_keys_independent(self, store: StateStore):
+        store.set_meta("album_id", "abc")
+        store.set_meta("other_key", "xyz")
+        assert store.get_meta("album_id") == "abc"
+        assert store.get_meta("other_key") == "xyz"
+
+
 class TestThreadSafety:
     def test_concurrent_writes_do_not_corrupt(self, store: StateStore):
         """Multiple threads upsert distinct paths — final count must be exact."""
