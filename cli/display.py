@@ -10,6 +10,7 @@ This module owns:
 from __future__ import annotations
 
 import datetime
+from pathlib import Path
 from typing import Optional
 
 from rich.console import Console
@@ -265,6 +266,31 @@ def show_final_report(
 # ---------------------------------------------------------------------------
 # Prompts
 # ---------------------------------------------------------------------------
+
+def print_credentials_setup_panel(creds_path: Path) -> None:
+    """Print a Rich panel with step-by-step Google Cloud setup instructions."""
+    content = (
+        "You need a Google Cloud OAuth credential to use this tool.\n\n"
+        "[bold]1.[/bold] Go to [bold]https://console.cloud.google.com[/bold]\n"
+        "[bold]2.[/bold] Create a new project (or select an existing one)\n"
+        "[bold]3.[/bold] Enable the [bold]Google Photos Library API[/bold]\n"
+        "   APIs & Services → Library → search [italic]Photos Library API[/italic]\n"
+        "[bold]4.[/bold] Create OAuth credentials\n"
+        "   APIs & Services → Credentials → Create → OAuth client ID\n"
+        "   Application type: [bold]Desktop app[/bold]\n"
+        f"[bold]5.[/bold] Download the JSON and save it to:\n"
+        f"   [bold cyan]{creds_path}[/bold cyan]\n\n"
+        "Then re-run: [bold]gphotos init[/bold]"
+    )
+    console.print(
+        Panel(
+            content,
+            title="[bold yellow]Google Cloud Setup Required[/bold yellow]",
+            border_style="yellow",
+            padding=(1, 2),
+        )
+    )
+
 
 def ask_continue_previous_run() -> bool:
     """Ask the user whether to continue a previous run."""

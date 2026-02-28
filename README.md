@@ -2,6 +2,19 @@
 
 A command-line tool for bulk uploading photos from an external hard drive to Google Photos. Built for reliability on large archives (5,000–20,000+ files) with resumable state, local compression, and a polished terminal experience.
 
+## Quick Start
+
+```bash
+git clone https://github.com/condedanilo/google-photos-uploader.git
+cd google-photos-uploader
+uv sync
+
+gphotos init                    # guided setup: config + Google Cloud + auth
+gphotos upload ~/Pictures       # start uploading
+```
+
+`gphotos init` walks you through everything, including obtaining the Google Cloud credential. Run it once and you're done.
+
 ## Features
 
 - **Resumable** — interrupted runs pick up exactly where they left off
@@ -60,25 +73,28 @@ macOS and Windows: HEIC support is bundled automatically via `pillow-heif`.
 
 ## Google Cloud Setup
 
-Before first use, you need to create OAuth credentials in Google Cloud Console:
+You need a one-time OAuth credential from Google. `gphotos init` reminds you of these steps if you haven't done them yet.
 
-1. Go to [console.cloud.google.com](https://console.cloud.google.com)
-2. Create a new project (or select an existing one)
+1. Go to **[console.cloud.google.com](https://console.cloud.google.com)** and sign in
+2. Create a new project (top-left dropdown → **New Project**)
 3. Enable the **Google Photos Library API**
-4. Go to **APIs & Services → Credentials → Create Credentials → OAuth client ID**
-5. Application type: **Desktop app**
-6. Download the JSON file and save it as `~/.config/gphotos-uploader/client_secret.json`
+   - **APIs & Services → Library** → search *Photos Library API* → **Enable**
+4. Create an OAuth client ID
+   - **APIs & Services → Credentials → Create Credentials → OAuth client ID**
+   - Application type: **Desktop app** — give it any name
+5. Click **Download JSON** and save the file as:
+   ```
+   ~/.config/gphotos-uploader/client_secret.json
+   ```
+6. Run `gphotos init` — it will open your browser for a one-time login
+
+> **Tip:** If you see a "Google hasn't verified this app" warning, click **Advanced → Go to (app name) (unsafe)**. This is expected for personal OAuth apps.
 
 ## Configuration
 
-Copy the example config and edit it:
+`~/.config/gphotos-uploader/uploader.toml` is created automatically with sensible defaults on the first run. Open it in any text editor to customise the tool's behaviour.
 
-```bash
-mkdir -p ~/.config/gphotos-uploader
-cp config/uploader.example.toml ~/.config/gphotos-uploader/uploader.toml
-```
-
-Key settings in `uploader.toml`:
+Key settings:
 
 ```toml
 [paths]
@@ -99,13 +115,19 @@ CLI flags override config file values.
 
 ## Usage
 
-### First run — authenticate
+### First run — guided setup
+
+```bash
+gphotos init
+```
+
+Walks through config creation, credential verification, and the one-time Google OAuth browser flow. The token is saved locally and refreshed automatically on subsequent runs.
+
+You can also trigger the OAuth flow directly at any time:
 
 ```bash
 gphotos auth login
 ```
-
-This opens your browser for a one-time Google OAuth flow. The token is saved locally and refreshed automatically on subsequent runs.
 
 ### Upload photos
 
