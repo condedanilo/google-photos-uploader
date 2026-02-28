@@ -8,7 +8,7 @@ import httpx
 import pytest
 import respx
 
-from uploader.api_client import GooglePhotosClient, _BATCH_CREATE_URL, _UPLOAD_URL
+from uploader.api_client import GooglePhotosClient, _ALBUMS_URL, _BATCH_CREATE_URL, _UPLOAD_URL
 from uploader.errors import (
     ApiError,
     NetworkError,
@@ -157,3 +157,52 @@ class TestBatchCreate:
         respx.post(_BATCH_CREATE_URL).mock(return_value=httpx.Response(429))
         with pytest.raises(RateLimitError):
             client.batch_create(tokens)
+
+    @respx.mock
+    def test_album_id_included_in_request_body(self, client):
+        tokens = [UploadToken(file_id=1, token="tok-1", original_path="/a.jpg")]
+        route = respx.post(_BATCH_CREATE_URL).mock(
+            return_value=httpx.Response(200, json=_batch_success_response([1]))
+        )
+        client.batch_create(tokens, album_id="album-abc-123")
+        sent_body = route.calls[0].request.content
+        import json
+        parsed = json.loads(sent_body)
+        assert parsed["albumId"] == "album-abc-123"
+
+    @respx.mock
+    def test_no_album_id_omits_field(self, client):
+        tokens = [UploadToken(file_id=1, token="tok-1", original_path="/a.jpg")]
+        route = respx.post(_BATCH_CREATE_URL).mock(
+            return_value=httpx.Response(200, json=_batch_success_response([1]))
+        )
+        client.batch_create(tokens)
+        import json
+        parsed = json.loads(route.calls[0].request.content)
+        assert "albumId" not in parsed
+
+
+# ---------------------------------------------------------------------------
+# get_or_create_album
+# ---------------------------------------------------------------------------
+
+class TestGetOrCreateAlbum:
+    @respx.mock
+    def test_returns_album_id_on_success(self, client):
+        respx.post(_ALBUMS_URL).mock(
+            return_value=httpx.Response(200, json={"id": "album-xyz", "title": "My Upload"})
+        )
+        album_id = client.get_or_create_album("My Upload")
+        assert album_id == "album-xyz"
+
+    @respx.mock
+    def test_raises_server_error_on_5xx(self, client):
+        respx.post(_ALBUMS_URL).mock(return_value=httpx.Response(500, text="error"))
+        with pytest.raises(ServerError):
+            client.get_or_create_album("My Upload")
+
+    @respx.mock
+    def test_raises_network_error_on_timeout(self, client):
+        respx.post(_ALBUMS_URL).mock(side_effect=httpx.TimeoutException("timed out"))
+        with pytest.raises(NetworkError):
+            client.get_or_create_album("My Upload")

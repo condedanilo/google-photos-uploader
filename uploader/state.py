@@ -64,6 +64,11 @@ CREATE TABLE IF NOT EXISTS runs (
     finished_at TEXT,
     exit_reason TEXT
 );
+
+CREATE TABLE IF NOT EXISTS meta (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 
@@ -241,14 +246,36 @@ class StateStore:
                 raise StateError(f"Failed to revert in-progress files: {e}") from e
 
     def clear_all(self) -> None:
-        """Delete all file records (used when user chooses 'start over')."""
+        """Delete all file records and metadata (used when user chooses 'start over')."""
         with self._lock:
             try:
                 self._conn.execute("DELETE FROM files")
+                self._conn.execute("DELETE FROM meta")
                 self._conn.commit()
             except sqlite3.Error as e:
                 self._conn.rollback()
                 raise StateError(f"Failed to clear state: {e}") from e
+
+    def set_meta(self, key: str, value: str) -> None:
+        """Persist a key/value pair in the meta table (upsert)."""
+        with self._lock:
+            try:
+                self._conn.execute(
+                    "INSERT INTO meta (key, value) VALUES (?, ?)"
+                    " ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (key, value),
+                )
+                self._conn.commit()
+            except sqlite3.Error as e:
+                self._conn.rollback()
+                raise StateError(f"Failed to set meta '{key}': {e}") from e
+
+    def get_meta(self, key: str) -> Optional[str]:
+        """Return the stored value for key, or None if not present."""
+        row = self._conn.execute(
+            "SELECT value FROM meta WHERE key = ?", (key,)
+        ).fetchone()
+        return row[0] if row else None
 
     def start_run(self) -> int:
         """Insert a runs row and return its id."""

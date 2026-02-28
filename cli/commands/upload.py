@@ -36,6 +36,7 @@ def upload(
     credentials: Annotated[Optional[Path], typer.Option("--credentials", help="Path to client_secret.json")] = None,
     token: Annotated[Optional[Path], typer.Option("--token", help="Path to token.json")] = None,
     state_db: Annotated[Optional[Path], typer.Option("--state-db", help="Path to SQLite state file")] = None,
+    album: Annotated[Optional[str], typer.Option("--album", help="Add uploaded photos to this Google Photos album (created if it doesn't exist)")] = None,
 ) -> None:
     """Bulk upload photos from SOURCE to Google Photos."""
     from cli.display import (
@@ -67,6 +68,7 @@ def upload(
             credentials_path=credentials,
             token_path=token,
             state_db_path=state_db,
+            album=album,
         )
     except ConfigError as e:
         console.print(f"[red]Configuration error:[/red] {e}")

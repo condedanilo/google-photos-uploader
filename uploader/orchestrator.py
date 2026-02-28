@@ -65,6 +65,14 @@ def run_upload(
     creds = get_credentials(config.credentials_path, config.token_path)
     client = GooglePhotosClient(creds, timeout=120.0)
 
+    # Resolve album ID (once per run; stored in state so resumes reuse same album)
+    album_id: Optional[str] = None
+    if config.album:
+        album_id = state.get_meta("album_id")
+        if not album_id:
+            album_id = client.get_or_create_album(config.album)
+            state.set_meta("album_id", album_id)
+
     # Load pending files
     pending = state.get_pending_files()
     if not pending:
@@ -93,6 +101,7 @@ def run_upload(
             client=client,
             state=state,
             config=config,
+            album_id=album_id,
             on_progress=on_progress,
             shutdown_event=shutdown_event,
             progress_event=progress_event,
@@ -114,6 +123,7 @@ def _batch_create_loop(
     client: GooglePhotosClient,
     state: StateStore,
     config: AppConfig,
+    album_id: Optional[str],
     on_progress: Callable[[RunStats], None],
     shutdown_event: threading.Event,
     progress_event: threading.Event,
@@ -152,7 +162,7 @@ def _batch_create_loop(
         # Call batchCreate with retry
         try:
             results = with_retry(
-                lambda b=batch: client.batch_create(b),
+                lambda b=batch: client.batch_create(b, album_id=album_id),
                 max_attempts=config.max_retries,
                 base_delay=config.retry_base_delay,
                 retryable=_BATCH_RETRYABLE,

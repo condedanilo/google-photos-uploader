@@ -32,6 +32,7 @@ from uploader.models import BatchCreateResult, UploadToken
 
 _UPLOAD_URL = "https://photoslibrary.googleapis.com/v1/uploads"
 _BATCH_CREATE_URL = "https://photoslibrary.googleapis.com/v1/mediaItems:batchCreate"
+_ALBUMS_URL = "https://photoslibrary.googleapis.com/v1/albums"
 
 # MIME type fallback for unknown extensions
 _DEFAULT_MIME = "application/octet-stream"
@@ -95,11 +96,44 @@ class GooglePhotosClient:
         _raise_for_status(response)
         return response.text.strip()
 
-    def batch_create(self, tokens: list[UploadToken]) -> list[BatchCreateResult]:
+    def get_or_create_album(self, title: str) -> str:
+        """Create a new Google Photos album and return its ID.
+
+        Args:
+            title: Display name for the album.
+
+        Returns:
+            The album ID string (used as ``albumId`` in batchCreate).
+
+        Raises:
+            RateLimitError, QuotaExhaustedError, ServerError, ApiError.
+        """
+        headers = {
+            "Authorization": f"Bearer {self._access_token()}",
+            "Content-Type": "application/json",
+        }
+        try:
+            response = httpx.post(
+                _ALBUMS_URL,
+                headers=headers,
+                json={"album": {"title": title}},
+                timeout=self._timeout,
+            )
+        except httpx.TimeoutException as e:
+            raise NetworkError(f"Album creation timed out: {e}") from e
+        except httpx.NetworkError as e:
+            raise NetworkError(f"Network error during album creation: {e}") from e
+
+        _raise_for_status(response)
+        return response.json()["id"]
+
+    def batch_create(self, tokens: list[UploadToken], *, album_id: Optional[str] = None) -> list[BatchCreateResult]:
         """Register uploaded files in Google Photos via mediaItems:batchCreate.
 
         Args:
             tokens: List of UploadToken objects (max 50 per call, API limit).
+            album_id: Optional album ID. When set, all items in this batch are
+                added to that album. The album must have been created by this app.
 
         Returns:
             List of BatchCreateResult, one per input token, in the same order.
@@ -126,11 +160,15 @@ class GooglePhotosClient:
             "Content-Type": "application/json",
         }
 
+        body: dict = {"newMediaItems": items}
+        if album_id:
+            body["albumId"] = album_id
+
         try:
             response = httpx.post(
                 _BATCH_CREATE_URL,
                 headers=headers,
-                json={"newMediaItems": items},
+                json=body,
                 timeout=self._timeout,
             )
         except httpx.TimeoutException as e:

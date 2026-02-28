@@ -67,3 +67,10 @@ follow_symlinks = false
 # Restrict upload to specific extensions.
 # Defaults to all Google Photos supported types when commented out.
 # include_extensions = [".jpg", ".jpeg", ".png", ".heic", ".mp4", ".mov"]
+
+[album]
+# Optional: add all uploaded photos to a named Google Photos album.
+# The album is created automatically if it doesn't exist.
+# On interrupted runs, the same album is reused (album ID is stored in state).
+# Equivalent to the --album CLI flag. Leave commented out to upload to library root.
+# name = "Bulk Upload 2024"

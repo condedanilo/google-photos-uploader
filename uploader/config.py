@@ -52,6 +52,9 @@ class AppConfig:
     follow_symlinks: bool
     include_extensions: Optional[frozenset[str]]  # None = all supported types
 
+    # Album
+    album: Optional[str]  # None = upload to library root (no album)
+
 
 # ---------------------------------------------------------------------------
 # Default values
@@ -106,6 +109,7 @@ def load(
     credentials_path: Optional[Path] = None,
     token_path: Optional[Path] = None,
     state_db_path: Optional[Path] = None,
+    album: Optional[str] = None,
 ) -> AppConfig:
     """Load and merge configuration from all sources, returning an AppConfig."""
 
@@ -137,6 +141,8 @@ def load(
         overrides["token_path"] = token_path
     if state_db_path is not None:
         overrides["state_db_path"] = state_db_path
+    if album is not None:
+        overrides["album"] = album
 
     if overrides:
         cfg = replace(cfg, **overrides)
@@ -209,6 +215,7 @@ def _build(d: dict) -> AppConfig:
     c = d.get("compression", {})
     n = d.get("notifications", {})
     s = d.get("scan", {})
+    a = d.get("album", {})
 
     raw_extensions = s.get("include_extensions")
     include_extensions: Optional[frozenset[str]] = None
@@ -238,6 +245,8 @@ def _build(d: dict) -> AppConfig:
 
         follow_symlinks    = bool(s.get("follow_symlinks", False)),
         include_extensions = include_extensions,
+
+        album              = a.get("name") or None,
     )
 
 

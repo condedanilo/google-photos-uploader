@@ -141,6 +141,9 @@ gphotos upload /path/to/photos --yes
 
 # Discard saved state and start from scratch
 gphotos upload /path/to/photos --reset
+
+# Group uploaded photos into a named album (created automatically if it doesn't exist)
+gphotos upload /path/to/photos --album "Hawaii 2024"
 ```
 
 ### Check auth status
