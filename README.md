@@ -21,6 +21,7 @@ gphotos upload ~/Pictures       # start uploading
 - **Deduplication** — files are identified by content hash (SHA-256), not filename; moved or renamed files are never uploaded twice
 - **Local compression** — compress images before upload to save Google Photos storage; choose from three preset levels
 - **Parallel uploads** — configurable worker threads for faster byte uploads; `batchCreate` calls are serialized per API requirements
+- **Album organisation** — group uploads into a single named album (`--album`) or automatically create one album per subdirectory (`--albums-from-dirs`)
 - **Real-time progress** — live display with files/min, ETA, and running compression savings
 - **Graceful shutdown** — Ctrl+C saves state cleanly; double Ctrl+C for immediate exit
 - **Human-readable errors** — API and OS errors translated to plain language with actionable guidance
@@ -166,6 +167,12 @@ gphotos upload /path/to/photos --reset
 
 # Group uploaded photos into a named album (created automatically if it doesn't exist)
 gphotos upload /path/to/photos --album "Hawaii 2024"
+
+# Create one album per subdirectory, preserving your folder organisation
+gphotos upload /path/to/photos --albums-from-dirs
+
+# Same as above, but prefix every album name (e.g. "Backup vacation", "Backup family")
+gphotos upload /path/to/photos --albums-from-dirs --album-prefix "Backup"
 ```
 
 ### Check auth status
