@@ -309,6 +309,26 @@ class StateStore:
         row = self._conn.execute("SELECT COUNT(*) FROM files").fetchone()
         return row[0] > 0
 
+    def has_actionable_state(self) -> bool:
+        """Return True if there are pending or error files worth resuming."""
+        row = self._conn.execute(
+            "SELECT COUNT(*) FROM files WHERE status IN ('pending','in_progress','error')"
+        ).fetchone()
+        return row[0] > 0
+
+    def get_last_run(self) -> Optional[dict]:
+        """Return the most recent run record as a dict, or None if no runs recorded."""
+        row = self._conn.execute(
+            "SELECT started_at, finished_at, exit_reason FROM runs ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "started_at": row["started_at"],
+            "finished_at": row["finished_at"],
+            "exit_reason": row["exit_reason"],
+        }
+
     def get_file_by_hash(self, content_hash: str) -> Optional[FileRecord]:
         """Find an uploaded file by content hash (deduplication check)."""
         row = self._conn.execute(
