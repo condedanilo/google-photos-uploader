@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Generator, Iterator, Optional
 
-from uploader.models import SUPPORTED_EXTENSIONS
+from uploader.models import SUPPORTED_EXTENSIONS, VIDEO_EXTENSIONS
 
 
 # ---------------------------------------------------------------------------
@@ -28,6 +28,8 @@ class ScanResult:
     """Summary returned after scanning completes."""
     paths: list[Path] = field(default_factory=list)
     skipped_count: int = 0   # files ignored (wrong extension, symlink, etc.)
+    photo_count: int = 0     # accepted files with image extensions
+    video_count: int = 0     # accepted files with video extensions
 
 
 def scan_directory(
@@ -67,6 +69,10 @@ def scan_directory(
             result.skipped_count += 1
             continue
         result.paths.append(path)
+        if ext in VIDEO_EXTENSIONS:
+            result.video_count += 1
+        else:
+            result.photo_count += 1
         if on_file_found is not None:
             on_file_found(len(result.paths), path)
 

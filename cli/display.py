@@ -90,10 +90,18 @@ class ScanDisplay:
                 description=f"[green]{count:,}[/green] files found",
             )
 
-    def stop(self, total: int) -> None:
+    def stop(self, total: int, photos: int = 0, videos: int = 0) -> None:
         if self._live:
             self._live.stop()
-        console.print(f"[green]✓[/green] Scan complete — [bold]{total:,}[/bold] files found.")
+        breakdown = ""
+        if photos > 0 or videos > 0:
+            breakdown = (
+                f" ([cyan]{photos:,}[/cyan] photo{'s' if photos != 1 else ''}"
+                f" · [magenta]{videos:,}[/magenta] video{'s' if videos != 1 else ''})"
+            )
+        console.print(
+            f"[green]✓[/green] Scan complete — [bold]{total:,}[/bold] files found{breakdown}."
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -173,8 +181,20 @@ def show_pre_upload_summary(stats: RunStats, workers: int) -> None:
         # Rough estimate: assume ~5 files/min per worker as a baseline
         eta = (pending / (workers * 5)) * 60
 
+    # Photo/video breakdown (only shown when both types are present)
+    type_breakdown = ""
+    if stats.total_photos > 0 and stats.total_videos > 0:
+        type_breakdown = (
+            f"  → [cyan]{stats.total_photos:,}[/cyan] photo{'s' if stats.total_photos != 1 else ''}"
+            f" · [magenta]{stats.total_videos:,}[/magenta] video{'s' if stats.total_videos != 1 else ''}."
+        )
+
     lines = [
         f"Found [bold]{stats.total:,}[/bold] files.",
+    ]
+    if type_breakdown:
+        lines.append(type_breakdown)
+    lines += [
         f"  → [yellow]{stats.skipped:,}[/yellow] already uploaded (will be skipped).",
         f"  → [bold green]{pending:,}[/bold green] files will be uploaded now.",
     ]
@@ -225,6 +245,27 @@ def show_final_report(
     )
 
     console.print(Panel(stats_table, title=title, border_style="green" if not interrupted else "red"))
+
+    # Photo/video breakdown (only shown when both types are present)
+    if stats.total_photos > 0 and stats.total_videos > 0:
+        type_table = Table(show_header=True, header_style="bold", box=None, padding=(0, 2))
+        type_table.add_column("Type")
+        type_table.add_column("Uploaded", justify="right")
+        type_table.add_column("Skipped", justify="right")
+        type_table.add_column("Errors", justify="right")
+        type_table.add_row(
+            "[cyan]Photos[/cyan]",
+            f"[green]{stats.uploaded_photos}[/green]",
+            str(stats.skipped_photos),
+            f"[red]{stats.errors_photos}[/red]" if stats.errors_photos else "0",
+        )
+        type_table.add_row(
+            "[magenta]Videos[/magenta]",
+            f"[green]{stats.uploaded_videos}[/green]",
+            str(stats.skipped_videos),
+            f"[red]{stats.errors_videos}[/red]" if stats.errors_videos else "0",
+        )
+        console.print(Panel(type_table, title="[bold]By Type[/bold]", border_style="dim"))
 
     # Compression summary
     if stats.total_original_bytes > 0:

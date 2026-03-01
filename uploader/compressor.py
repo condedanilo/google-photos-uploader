@@ -1,22 +1,24 @@
-"""Local image compression before upload.
+"""Local image and video compression before upload.
 
 Design:
   - JPEG/PNG/HEIC → compressed JPEG written to a temp file
   - EXIF DateTimeOriginal + GPS tags are preserved so Google Photos uses
     the original capture date instead of the upload date
   - If the compressed output is larger than the original, the original is used
-  - Videos and other non-compressible types are passed through unchanged
+  - Video files → transcoded to H.264/AAC via ffmpeg (requires ffmpeg on PATH)
   - The caller is responsible for deleting the temp file after use
 """
 from __future__ import annotations
 
 import io
 import os
+import shutil
+import subprocess
 import tempfile
 from pathlib import Path
 from typing import Optional
 
-from uploader.errors import CompressionError
+from uploader.errors import CompressionError, FfmpegNotFoundError
 from uploader.models import (
     COMPRESSIBLE_EXTENSIONS,
     CompressionLevel,
@@ -96,6 +98,125 @@ def cleanup_temp(result: CompressionResult) -> None:
     """Delete the temp compressed file if one was created."""
     if result.was_compressed and result.output_path != result.source_path:
         _safe_delete(Path(result.output_path))
+
+
+# ---------------------------------------------------------------------------
+# Video compression
+# ---------------------------------------------------------------------------
+
+def check_ffmpeg() -> None:
+    """Raise FfmpegNotFoundError if ffmpeg is not available on PATH."""
+    if shutil.which("ffmpeg") is None:
+        raise FfmpegNotFoundError()
+
+
+def compress_video(
+    source: Path,
+    *,
+    max_height: int = 1080,
+    crf: int = 23,
+    preset: str = "medium",
+    audio_bitrate: str = "128k",
+    skip_if_larger: bool = True,
+    _tmp_dir: Optional[Path] = None,
+) -> CompressionResult:
+    """Transcode *source* video to H.264/AAC MP4 and write to a temp file.
+
+    Args:
+        source: The original video file.
+        max_height: Downscale if video height exceeds this value. 0 = no scaling.
+        crf: H.264 CRF quality (lower = better quality, larger file).
+        preset: ffmpeg speed/compression preset.
+        audio_bitrate: AAC audio bitrate (e.g. "128k").
+        skip_if_larger: If True and the transcoded file is larger, use the original.
+        _tmp_dir: Override the temp directory (used in tests).
+
+    Returns:
+        CompressionResult with paths and size information.
+
+    Raises:
+        CompressionError: if ffprobe or ffmpeg fail.
+        FfmpegNotFoundError: if ffmpeg is not on PATH.
+    """
+    original_bytes = source.stat().st_size
+
+    # Determine video height via ffprobe
+    height = _probe_video_height(source)
+
+    # Build ffmpeg command
+    cmd = ["ffmpeg", "-i", str(source), "-c:v", "libx264", "-crf", str(crf),
+           "-preset", preset, "-c:a", "aac", "-b:a", audio_bitrate,
+           "-movflags", "+faststart"]
+
+    if max_height > 0 and height is not None and height > max_height:
+        # scale=-2:max_height keeps aspect ratio and ensures even width
+        cmd += ["-vf", f"scale=-2:{max_height}"]
+
+    tmp_path = _make_temp_video_path(_tmp_dir)
+    cmd += ["-y", str(tmp_path)]
+
+    try:
+        result = subprocess.run(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            timeout=3600,  # 1 hour max per video
+        )
+    except subprocess.TimeoutExpired as e:
+        _safe_delete(tmp_path)
+        raise CompressionError(f"ffmpeg timed out on {source}") from e
+    except OSError as e:
+        _safe_delete(tmp_path)
+        raise FfmpegNotFoundError() from e
+
+    if result.returncode != 0:
+        _safe_delete(tmp_path)
+        stderr = result.stderr.decode(errors="replace").strip()
+        raise CompressionError(f"ffmpeg failed on {source}: {stderr[-300:]}")
+
+    transcoded_bytes = tmp_path.stat().st_size
+
+    if skip_if_larger and transcoded_bytes >= original_bytes:
+        _safe_delete(tmp_path)
+        return CompressionResult(
+            source_path=str(source),
+            output_path=str(source),
+            original_bytes=original_bytes,
+            output_bytes=original_bytes,
+            was_compressed=False,
+        )
+
+    return CompressionResult(
+        source_path=str(source),
+        output_path=str(tmp_path),
+        original_bytes=original_bytes,
+        output_bytes=transcoded_bytes,
+        was_compressed=True,
+    )
+
+
+def _probe_video_height(source: Path) -> Optional[int]:
+    """Return the video stream height in pixels, or None if ffprobe fails."""
+    ffprobe = shutil.which("ffprobe")
+    if ffprobe is None:
+        return None
+    try:
+        result = subprocess.run(
+            [
+                ffprobe, "-v", "error",
+                "-select_streams", "v:0",
+                "-show_entries", "stream=height",
+                "-of", "csv=p=0",
+                str(source),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        line = result.stdout.strip()
+        return int(line) if line.isdigit() else None
+    except Exception:
+        return None
 
 
 # ---------------------------------------------------------------------------
@@ -204,6 +325,15 @@ def _extract_filtered_exif(img, source: Path) -> Optional[bytes]:
 
 def _make_temp_path(tmp_dir: Optional[Path]) -> Path:
     kwargs: dict = {"suffix": ".jpg"}
+    if tmp_dir:
+        kwargs["dir"] = str(tmp_dir)
+    fd, name = tempfile.mkstemp(**kwargs)
+    os.close(fd)
+    return Path(name)
+
+
+def _make_temp_video_path(tmp_dir: Optional[Path]) -> Path:
+    kwargs: dict = {"suffix": ".mp4"}
     if tmp_dir:
         kwargs["dir"] = str(tmp_dir)
     fd, name = tempfile.mkstemp(**kwargs)

@@ -20,8 +20,10 @@ from typing import Callable, Optional
 
 from uploader.api_client import GooglePhotosClient
 from uploader.auth import get_credentials
+from uploader.compressor import check_ffmpeg
 from uploader.config import AppConfig
 from uploader.errors import (
+    FfmpegNotFoundError,
     NetworkError,
     QuotaExhaustedError,
     RateLimitError,
@@ -61,6 +63,10 @@ def run_upload(
     Returns:
         Final RunStats after all workers have finished.
     """
+    # Check for ffmpeg if video compression is enabled
+    if config.compress_video:
+        check_ffmpeg()
+
     # Authenticate
     creds = get_credentials(config.credentials_path, config.token_path)
     client = GooglePhotosClient(creds, timeout=120.0)
@@ -214,7 +220,7 @@ def scan_and_register(
     config: AppConfig,
     state: StateStore,
     on_file_scanned: Callable[[int, str], None],
-) -> int:
+) -> tuple[int, int, int]:
     """Scan source directory, hash files, and register them in state.
 
     Handles:
@@ -231,7 +237,7 @@ def scan_and_register(
             ``on_file_scanned(total_found_so_far, display_path)``.
 
     Returns:
-        Total number of files found (including skipped).
+        Tuple of (total_files, photo_count, video_count).
     """
     from pathlib import Path as _Path
 
@@ -310,4 +316,4 @@ def scan_and_register(
             original_size_bytes=size,
         ))
 
-    return len(scan_result.paths)
+    return len(scan_result.paths), scan_result.photo_count, scan_result.video_count

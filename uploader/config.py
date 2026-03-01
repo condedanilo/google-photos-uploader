@@ -39,10 +39,17 @@ class AppConfig:
     # Error handling
     on_quota_exhausted: str  # "exit" (v1 only)
 
-    # Compression
+    # Image compression
     compress: bool
     compression_level: CompressionLevel
     skip_if_larger: bool     # use original if compressed file is bigger
+
+    # Video compression
+    compress_video: bool
+    video_max_height: int    # downscale if taller than this; 0 = no scaling
+    video_crf: int           # H.264 CRF quality (18=high, 28=small, 23=default)
+    video_preset: str        # ffmpeg speed/compression preset
+    video_audio_bitrate: str # AAC audio bitrate (e.g. "128k")
 
     # Notifications
     notify_on_complete: bool
@@ -137,6 +144,26 @@ follow_symlinks = false
 # Restrict upload to specific extensions.
 # Defaults to all Google Photos supported types when commented out.
 # include_extensions = [".jpg", ".jpeg", ".png", ".heic", ".mp4", ".mov"]
+
+[video_compression]
+# Transcode videos to H.264/AAC before upload.
+# Requires ffmpeg on PATH (brew install ffmpeg / sudo apt install ffmpeg).
+enabled = true
+
+# Downscale to this height if the video is taller. Set to 0 to skip scaling.
+# Example: 1080 converts 4K → 1080p; 720 converts 1080p → 720p.
+max_height = 1080
+
+# H.264 quality (CRF). Lower = better quality and larger file.
+#   18 = near-lossless, 23 = default, 28 = smaller/noticeable quality loss
+crf = 23
+
+# ffmpeg encoding speed preset. Slower presets = smaller files at same quality.
+# Options: ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow
+preset = "medium"
+
+# AAC audio bitrate.
+audio_bitrate = "128k"
 """
 
 _DEFAULTS: dict = {
@@ -156,6 +183,13 @@ _DEFAULTS: dict = {
         "enabled":       True,
         "level":         "mid",
         "skip_if_larger": True,
+    },
+    "video_compression": {
+        "enabled":       True,
+        "max_height":    1080,
+        "crf":           23,
+        "preset":        "medium",
+        "audio_bitrate": "128k",
     },
     "notifications": {
         "enabled": True,
@@ -179,6 +213,7 @@ def load(
     workers: Optional[int] = None,
     compress: Optional[bool] = None,
     compression_level: Optional[str] = None,
+    compress_video: Optional[bool] = None,
     max_retries: Optional[int] = None,
     credentials_path: Optional[Path] = None,
     token_path: Optional[Path] = None,
@@ -207,6 +242,8 @@ def load(
         overrides["compress"] = compress
     if compression_level is not None:
         overrides["compression_level"] = _parse_compression_level(compression_level)
+    if compress_video is not None:
+        overrides["compress_video"] = compress_video
     if max_retries is not None:
         overrides["max_retries"] = max_retries
     if credentials_path is not None:
@@ -287,6 +324,7 @@ def _build(d: dict) -> AppConfig:
     p = d.get("paths", {})
     u = d.get("upload", {})
     c = d.get("compression", {})
+    v = d.get("video_compression", {})
     n = d.get("notifications", {})
     s = d.get("scan", {})
     a = d.get("album", {})
@@ -313,6 +351,12 @@ def _build(d: dict) -> AppConfig:
         compress           = bool(c.get("enabled", True)),
         compression_level  = _parse_compression_level(c.get("level", "mid")),
         skip_if_larger     = bool(c.get("skip_if_larger", True)),
+
+        compress_video     = bool(v.get("enabled", True)),
+        video_max_height   = int(v.get("max_height", 1080)),
+        video_crf          = int(v.get("crf", 23)),
+        video_preset       = str(v.get("preset", "medium")),
+        video_audio_bitrate = str(v.get("audio_bitrate", "128k")),
 
         notify_on_complete = bool(n.get("enabled", True)),
         beep_on_complete   = bool(n.get("beep", True)),

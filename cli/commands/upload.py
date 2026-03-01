@@ -15,6 +15,7 @@ from uploader.errors import (
     AuthError,
     ConfigError,
     DiskFullError,
+    FfmpegNotFoundError,
     QuotaExhaustedError,
     StateCorruptedError,
     human_message,
@@ -30,6 +31,7 @@ def upload(
     workers: Annotated[Optional[int], typer.Option("--workers", "-w", help="Parallel upload threads")] = None,
     no_compress: Annotated[bool, typer.Option("--no-compress", help="Skip image compression")] = False,
     compression_level: Annotated[Optional[str], typer.Option("--compression-level", help="Compression level: low | mid | high")] = None,
+    no_compress_video: Annotated[bool, typer.Option("--no-compress-video", help="Skip video transcoding (upload videos as-is)")] = False,
     max_retries: Annotated[Optional[int], typer.Option("--max-retries", help="Retries per file")] = None,
     yes: Annotated[bool, typer.Option("--yes", "-y", help="Skip confirmation prompts")] = False,
     reset: Annotated[bool, typer.Option("--reset", help="Ignore saved state and start fresh")] = False,
@@ -64,6 +66,7 @@ def upload(
             workers=workers,
             compress=False if no_compress else None,
             compression_level=compression_level,
+            compress_video=False if no_compress_video else None,
             max_retries=max_retries,
             credentials_path=credentials,
             token_path=token,
@@ -104,7 +107,7 @@ def upload(
     scan_display.start()
 
     try:
-        total_found = scan_and_register(
+        total_found, photo_count, video_count = scan_and_register(
             source, config, state,
             on_file_scanned=scan_display.update,
         )
@@ -113,7 +116,7 @@ def upload(
         console.print(f"[red]Permission error during scan:[/red] {e}")
         raise typer.Exit(1)
 
-    scan_display.stop(total_found)
+    scan_display.stop(total_found, photo_count, video_count)
 
     if total_found == 0:
         console.print("[yellow]No supported media files found in the specified directory.[/yellow]")
@@ -170,6 +173,11 @@ def upload(
     try:
         final_stats = run_upload(config, state, on_progress, shutdown_event)
         final_stats.start_time = start_time
+    except FfmpegNotFoundError as e:
+        progress_display.stop()
+        console.print(f"\n[red]ffmpeg not found:[/red] {e}")
+        state.close()
+        raise typer.Exit(1)
     except QuotaExhaustedError as e:
         interrupted = True
         console.print(f"\n[red bold]Quota exhausted:[/red bold] {human_message(e)}")
