@@ -84,6 +84,7 @@ class UploadToken:
     file_id: int
     token: str
     original_path: str
+    album_id: Optional[str] = None
 
 
 @dataclass

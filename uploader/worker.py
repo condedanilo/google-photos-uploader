@@ -19,6 +19,7 @@ from __future__ import annotations
 import queue
 import threading
 from pathlib import Path
+from typing import Optional
 
 from uploader.api_client import GooglePhotosClient
 from uploader.compressor import cleanup_temp, compress
@@ -62,6 +63,7 @@ def upload_file(
     token_queue: "queue.Queue[UploadToken]",
     shutdown_event: threading.Event,
     progress_event: threading.Event,
+    album_id: Optional[str] = None,
 ) -> None:
     """Execute the full upload pipeline for a single file.
 
@@ -158,6 +160,7 @@ def upload_file(
             file_id=record.id,
             token=upload_token,
             original_path=record.path,
+            album_id=album_id,
         ))
 
         # --- Step 9: Record sizes (status stays IN_PROGRESS until batchCreate confirms) ---
