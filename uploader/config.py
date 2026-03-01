@@ -54,6 +54,8 @@ class AppConfig:
 
     # Album
     album: Optional[str]  # None = upload to library root (no album)
+    album_per_dir: bool          # Create one album per subdirectory
+    album_prefix: Optional[str]  # Optional prefix prepended to every album name
 
 
 # ---------------------------------------------------------------------------
@@ -184,6 +186,8 @@ def load(
     token_path: Optional[Path] = None,
     state_db_path: Optional[Path] = None,
     album: Optional[str] = None,
+    album_per_dir: bool = False,
+    album_prefix: Optional[str] = None,
 ) -> AppConfig:
     """Load and merge configuration from all sources, returning an AppConfig."""
 
@@ -217,6 +221,10 @@ def load(
         overrides["state_db_path"] = state_db_path
     if album is not None:
         overrides["album"] = album
+    if album_per_dir:
+        overrides["album_per_dir"] = True
+    if album_prefix is not None:
+        overrides["album_prefix"] = album_prefix
 
     if overrides:
         cfg = replace(cfg, **overrides)
@@ -321,6 +329,8 @@ def _build(d: dict) -> AppConfig:
         include_extensions = include_extensions,
 
         album              = a.get("name") or None,
+        album_per_dir      = False,
+        album_prefix       = None,
     )
 
 
@@ -365,3 +375,5 @@ def _validate(cfg: AppConfig) -> None:
         raise ConfigError("retry_base_delay must be >= 0")
     if cfg.on_quota_exhausted not in ("exit",):
         raise ConfigError(f"on_quota_exhausted must be 'exit', got: {cfg.on_quota_exhausted!r}")
+    if cfg.album and cfg.album_per_dir:
+        raise ConfigError("--album and --albums-from-dirs cannot be used together")

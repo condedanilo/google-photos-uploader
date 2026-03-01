@@ -15,7 +15,9 @@ from __future__ import annotations
 import queue
 import threading
 import time
+from collections import defaultdict
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from pathlib import Path
 from typing import Callable, Optional
 
 from uploader.api_client import GooglePhotosClient
@@ -47,6 +49,7 @@ def run_upload(
     state: StateStore,
     on_progress: Callable[[RunStats], None],
     shutdown_event: threading.Event,
+    source_dir: Optional[Path] = None,
 ) -> RunStats:
     """Execute the full upload run.
 
@@ -65,18 +68,42 @@ def run_upload(
     creds = get_credentials(config.credentials_path, config.token_path)
     client = GooglePhotosClient(creds, timeout=120.0)
 
-    # Resolve album ID (once per run; stored in state so resumes reuse same album)
-    album_id: Optional[str] = None
-    if config.album:
-        album_id = state.get_meta("album_id")
-        if not album_id:
-            album_id = client.get_or_create_album(config.album)
-            state.set_meta("album_id", album_id)
+    # Resolve album(s)
+    album_id: Optional[str] = None          # used for --album (global)
+    dir_album_map: dict[str, str] = {}      # used for --albums-from-dirs
 
     # Load pending files
     pending = state.get_pending_files()
     if not pending:
         return state.get_stats()
+
+    if config.album:
+        # Single global album (existing behaviour)
+        album_id = state.get_meta("album_id")
+        if not album_id:
+            album_id = client.get_or_create_album(config.album)
+            state.set_meta("album_id", album_id)
+
+    elif config.album_per_dir and source_dir is not None:
+        # Pre-create one album per unique immediate parent directory
+        unique_dirs: set[str] = set()
+        for record in pending:
+            parent = Path(record.path).parent
+            try:
+                rel = parent.relative_to(source_dir)
+            except ValueError:
+                continue
+            if str(rel) != ".":
+                unique_dirs.add(parent.name)
+
+        for dir_name in sorted(unique_dirs):
+            album_name = f"{config.album_prefix} {dir_name}" if config.album_prefix else dir_name
+            meta_key = f"album_id_dir:{dir_name}"
+            stored_id = state.get_meta(meta_key)
+            if not stored_id:
+                stored_id = client.get_or_create_album(album_name)
+                state.set_meta(meta_key, stored_id)
+            dir_album_map[dir_name] = stored_id
 
     token_queue: queue.Queue[UploadToken] = queue.Queue()
     progress_event = threading.Event()
@@ -87,10 +114,16 @@ def run_upload(
         for record in pending:
             if shutdown_event.is_set():
                 break
+            # Determine which album this file belongs to
+            if config.album_per_dir and source_dir is not None:
+                file_album_id = dir_album_map.get(Path(record.path).parent.name)
+            else:
+                file_album_id = album_id
             future = executor.submit(
                 upload_file,
                 record, config, client, state,
                 token_queue, shutdown_event, progress_event,
+                album_id=file_album_id,
             )
             futures.append(future)
 
@@ -101,7 +134,6 @@ def run_upload(
             client=client,
             state=state,
             config=config,
-            album_id=album_id,
             on_progress=on_progress,
             shutdown_event=shutdown_event,
             progress_event=progress_event,
@@ -123,7 +155,6 @@ def _batch_create_loop(
     client: GooglePhotosClient,
     state: StateStore,
     config: AppConfig,
-    album_id: Optional[str],
     on_progress: Callable[[RunStats], None],
     shutdown_event: threading.Event,
     progress_event: threading.Event,
@@ -159,37 +190,46 @@ def _batch_create_loop(
             # Still process the batch — we have valid upload tokens, don't waste them
             pass
 
-        # Call batchCreate with retry
-        try:
-            results = with_retry(
-                lambda b=batch: client.batch_create(b, album_id=album_id),
-                max_attempts=config.max_retries,
-                base_delay=config.retry_base_delay,
-                retryable=_BATCH_RETRYABLE,
-                non_retryable=_BATCH_NON_RETRYABLE,
-            )
-        except QuotaExhaustedError as exc:
-            shutdown_event.set()
-            # Mark all tokens in this batch as error
-            for token in batch:
-                state.set_status(
-                    token.file_id, FileStatus.ERROR,
-                    error_msg=human_message(exc),
+        # Group batch by album_id so each album gets its own batchCreate call
+        by_album: dict[Optional[str], list[UploadToken]] = defaultdict(list)
+        for token in batch:
+            by_album[token.album_id].append(token)
+
+        all_results: list[BatchCreateResult] = []
+        quota_error = False
+
+        for aid, tokens_for_album in by_album.items():
+            try:
+                results = with_retry(
+                    lambda b=tokens_for_album, a=aid: client.batch_create(b, album_id=a),
+                    max_attempts=config.max_retries,
+                    base_delay=config.retry_base_delay,
+                    retryable=_BATCH_RETRYABLE,
+                    non_retryable=_BATCH_NON_RETRYABLE,
                 )
+                all_results.extend(results)
+            except QuotaExhaustedError as exc:
+                shutdown_event.set()
+                for token in tokens_for_album:
+                    state.set_status(
+                        token.file_id, FileStatus.ERROR,
+                        error_msg=human_message(exc),
+                    )
+                quota_error = True
+                break
+            except Exception as exc:
+                for token in tokens_for_album:
+                    state.set_status(
+                        token.file_id, FileStatus.ERROR,
+                        error_msg=f"batchCreate failed: {exc}",
+                    )
+
+        if quota_error:
             on_progress(state.get_stats())
             return
-        except Exception as exc:
-            # After exhausting retries, mark all tokens as error
-            for token in batch:
-                state.set_status(
-                    token.file_id, FileStatus.ERROR,
-                    error_msg=f"batchCreate failed: {exc}",
-                )
-            on_progress(state.get_stats())
-            continue
 
         # Update state for each result
-        for result in results:
+        for result in all_results:
             if result.success:
                 state.set_status(
                     result.file_id, FileStatus.UPLOADED,

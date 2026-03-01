@@ -37,6 +37,8 @@ def upload(
     token: Annotated[Optional[Path], typer.Option("--token", help="Path to token.json")] = None,
     state_db: Annotated[Optional[Path], typer.Option("--state-db", help="Path to SQLite state file")] = None,
     album: Annotated[Optional[str], typer.Option("--album", help="Add uploaded photos to this Google Photos album (created if it doesn't exist)")] = None,
+    albums_from_dirs: Annotated[bool, typer.Option("--albums-from-dirs", help="Create one Google Photos album per subdirectory (mutually exclusive with --album)")] = False,
+    album_prefix: Annotated[Optional[str], typer.Option("--album-prefix", help="Prefix to prepend to every album name created by --albums-from-dirs")] = None,
 ) -> None:
     """Bulk upload photos from SOURCE to Google Photos."""
     from cli.display import (
@@ -50,6 +52,10 @@ def upload(
     )
 
     # --- 1. Validate source directory ---
+    if album and albums_from_dirs:
+        console.print("[red]Error:[/red] --album and --albums-from-dirs are mutually exclusive")
+        raise typer.Exit(1)
+
     if not source.exists():
         console.print(f"[red]Error:[/red] Directory not found: {source}")
         raise typer.Exit(1)
@@ -69,6 +75,8 @@ def upload(
             token_path=token,
             state_db_path=state_db,
             album=album,
+            album_per_dir=albums_from_dirs,
+            album_prefix=album_prefix,
         )
     except ConfigError as e:
         console.print(f"[red]Configuration error:[/red] {e}")
@@ -168,7 +176,7 @@ def upload(
 
     interrupted = False
     try:
-        final_stats = run_upload(config, state, on_progress, shutdown_event)
+        final_stats = run_upload(config, state, on_progress, shutdown_event, source_dir=source)
         final_stats.start_time = start_time
     except QuotaExhaustedError as e:
         interrupted = True
