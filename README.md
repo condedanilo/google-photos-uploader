@@ -26,6 +26,38 @@ gphotos upload ~/Pictures       # start uploading
 - **Human-readable errors** — API and OS errors translated to plain language with actionable guidance
 - **Cross-platform** — runs on macOS, Linux, and Windows
 
+## Supported File Types
+
+### Photos
+
+| Extension | Notes |
+|-----------|-------|
+| `.jpg`, `.jpeg` | Compressed before upload (configurable quality) |
+| `.png` | Compressed to JPEG before upload |
+| `.heic`, `.heif` | Compressed to JPEG (requires `libheif` on Linux) |
+| `.gif`, `.bmp`, `.webp` | Uploaded as-is |
+| `.tiff`, `.tif` | Uploaded as-is |
+| `.raw`, `.arw`, `.cr2`, `.nef`, `.dng` | RAW camera files, uploaded as-is |
+
+### Videos
+
+| Extension | Notes |
+|-----------|-------|
+| `.mp4`, `.mov` | Transcoded to H.264/AAC (requires `ffmpeg`) |
+| `.avi`, `.wmv`, `.mkv` | Transcoded to H.264/AAC (requires `ffmpeg`) |
+| `.3gp`, `.mpg`, `.mpeg` | Transcoded to H.264/AAC (requires `ffmpeg`) |
+
+Video transcoding requires `ffmpeg` on your PATH:
+```bash
+# macOS
+brew install ffmpeg
+
+# Ubuntu / Debian
+sudo apt install ffmpeg
+```
+
+Use `--no-compress-video` to skip transcoding and upload videos as-is.
+
 ## Installation
 
 ### Requirements
@@ -155,6 +187,9 @@ gphotos upload /path/to/photos --compression-level high
 # Skip compression entirely (upload original files)
 gphotos upload /path/to/photos --no-compress
 
+# Skip video transcoding (upload videos as-is)
+gphotos upload /path/to/photos --no-compress-video
+
 # Use 6 parallel workers instead of the default 4
 gphotos upload /path/to/photos --workers 6
 
@@ -182,7 +217,7 @@ gphotos auth status
 | `mid`  | 85           | ~50–60%         | Google "Storage Saver" equivalent **(default)** |
 | `high` | 60           | ~70–80%         | Aggressive; slight quality loss visible on close inspection |
 
-Videos (MP4, MOV, etc.) are uploaded as-is regardless of compression settings.
+Videos are transcoded to H.264/AAC (1080p max by default) when `ffmpeg` is available. Use `--no-compress-video` to upload them as-is.
 
 The final report shows the total original size, uploaded size, and bytes saved.
 

@@ -356,6 +356,29 @@ class StateStore:
             """
         ).fetchone()
 
+        # Per-type counts (video extensions identified by file path)
+        _VIDEO_LIKE = (
+            "lower(path) LIKE '%.mp4' OR lower(path) LIKE '%.mov'"
+            " OR lower(path) LIKE '%.avi' OR lower(path) LIKE '%.wmv'"
+            " OR lower(path) LIKE '%.mkv' OR lower(path) LIKE '%.3gp'"
+            " OR lower(path) LIKE '%.mpg' OR lower(path) LIKE '%.mpeg'"
+        )
+        type_counts: dict[tuple[str, str], int] = {}
+        for row in self._conn.execute(
+            f"""
+            SELECT
+                status,
+                CASE WHEN {_VIDEO_LIKE} THEN 'video' ELSE 'photo' END AS media_type,
+                COUNT(*) AS cnt
+            FROM files
+            GROUP BY status, media_type
+            """
+        ):
+            type_counts[(row["status"], row["media_type"])] = row["cnt"]
+
+        def _tc(status: str, mtype: str) -> int:
+            return type_counts.get((status, mtype), 0)
+
         return RunStats(
             total=total,
             uploaded=counts.get("uploaded", 0),
@@ -363,6 +386,18 @@ class StateStore:
             errors=counts.get("error", 0),
             total_original_bytes=size_row["orig"] if size_row else 0,
             total_compressed_bytes=size_row["comp"] if size_row else 0,
+            total_photos=_tc("pending", "photo") + _tc("in_progress", "photo")
+                         + _tc("uploaded", "photo") + _tc("skipped", "photo")
+                         + _tc("error", "photo"),
+            total_videos=_tc("pending", "video") + _tc("in_progress", "video")
+                         + _tc("uploaded", "video") + _tc("skipped", "video")
+                         + _tc("error", "video"),
+            uploaded_photos=_tc("uploaded", "photo"),
+            uploaded_videos=_tc("uploaded", "video"),
+            skipped_photos=_tc("skipped", "photo"),
+            skipped_videos=_tc("skipped", "video"),
+            errors_photos=_tc("error", "photo"),
+            errors_videos=_tc("error", "video"),
         )
 
     def _get_id_for_path(self, path: str) -> int:

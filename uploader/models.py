@@ -8,6 +8,7 @@ from __future__ import annotations
 import datetime
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Optional
 
 
@@ -54,7 +55,16 @@ COMPRESSIBLE_EXTENSIONS: frozenset[str] = frozenset({
     ".jpg", ".jpeg", ".png", ".heic", ".heif",
 })
 
+VIDEO_EXTENSIONS: frozenset[str] = frozenset({
+    ".mp4", ".mov", ".avi", ".wmv", ".mkv", ".3gp", ".mpg", ".mpeg",
+})
+
 MAX_FILE_SIZE_BYTES: int = 200 * 1024 * 1024  # 200 MB — Google Photos hard limit
+
+
+def is_video(path: Path) -> bool:
+    """Return True if *path* has a video extension."""
+    return Path(path).suffix.lower() in VIDEO_EXTENSIONS
 
 
 # ---------------------------------------------------------------------------
@@ -127,6 +137,16 @@ class RunStats:
     total_original_bytes: int = 0     # Sum of original_size_bytes for processed files
     total_compressed_bytes: int = 0   # Sum of compressed_size_bytes (or original when not compressed)
     start_time: Optional[datetime.datetime] = None
+
+    # Per-type counts (photos vs videos)
+    total_photos: int = 0
+    total_videos: int = 0
+    uploaded_photos: int = 0
+    uploaded_videos: int = 0
+    skipped_photos: int = 0
+    skipped_videos: int = 0
+    errors_photos: int = 0
+    errors_videos: int = 0
 
     @property
     def remaining(self) -> int:

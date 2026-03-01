@@ -34,7 +34,7 @@ def store(tmp_path: Path) -> StateStore:
 def config(tmp_path: Path):
     from uploader.config import _build, _deep_merge, _DEFAULTS
     cfg = _build(_deep_merge(_DEFAULTS, {}))
-    return replace(cfg, compress=False, workers=2, max_retries=1, retry_base_delay=0.0)
+    return replace(cfg, compress=False, compress_video=False, workers=2, max_retries=1, retry_base_delay=0.0)
 
 
 @pytest.fixture

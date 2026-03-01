@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Optional
 
 from uploader.api_client import GooglePhotosClient
-from uploader.compressor import cleanup_temp, compress
+from uploader.compressor import cleanup_temp, compress, compress_video
 from uploader.config import AppConfig
 from uploader.errors import (
     CompressionError,
@@ -43,6 +43,7 @@ from uploader.models import (
     FileRecord,
     FileStatus,
     UploadToken,
+    is_video,
 )
 from uploader.retry import with_retry
 from uploader.state import StateStore
@@ -123,7 +124,8 @@ def upload_file(
 
         # --- Step 6: Compress ---
         compression_result = None
-        if config.compress:
+        if config.compress and path.suffix.lower() in COMPRESSIBLE_EXTENSIONS:
+            # Image compression
             try:
                 compression_result = compress(
                     path,
@@ -132,6 +134,20 @@ def upload_file(
                 )
             except CompressionError:
                 # Compression failure is non-fatal — upload the original
+                compression_result = None
+        elif config.compress_video and is_video(path):
+            # Video compression (transcode to H.264/AAC via ffmpeg)
+            try:
+                compression_result = compress_video(
+                    path,
+                    max_height=config.video_max_height,
+                    crf=config.video_crf,
+                    preset=config.video_preset,
+                    audio_bitrate=config.video_audio_bitrate,
+                    skip_if_larger=config.skip_if_larger,
+                )
+            except Exception:
+                # Transcoding failure is non-fatal — upload the original
                 compression_result = None
 
         upload_path = Path(compression_result.output_path) if compression_result else path

@@ -101,6 +101,18 @@ class CompressionError(UploaderError):
     """Could not compress the image (corrupt data, unsupported format, etc.)."""
 
 
+class FfmpegNotFoundError(UploaderError):
+    """ffmpeg binary not found on PATH; required for video compression."""
+
+    def __init__(self):
+        super().__init__(
+            "ffmpeg not found on PATH. Install it to enable video compression:\n"
+            "  macOS:  brew install ffmpeg\n"
+            "  Ubuntu: sudo apt install ffmpeg\n"
+            "Or disable video compression with --no-compress-video."
+        )
+
+
 # ---------------------------------------------------------------------------
 # State / database
 # ---------------------------------------------------------------------------
@@ -146,6 +158,11 @@ _HUMAN_MESSAGES: dict[type[UploaderError], str] = {
     EmptyFileError:       "File is empty (0 bytes) — skipped.",
     FileReadError:        "File could not be read. It may have been moved, deleted, or corrupted.",
     CompressionError:     "Image could not be compressed — uploading original instead.",
+    FfmpegNotFoundError:  (
+        "ffmpeg is required for video compression but was not found on PATH. "
+        "Install it (brew install ffmpeg / sudo apt install ffmpeg) "
+        "or disable video compression with --no-compress-video."
+    ),
     StateCorruptedError:  "Upload state database is corrupted. Run with --reset to start over.",
     DiskFullError:        "Local disk is full. Free up space and re-run — progress is preserved.",
     ConfigError:          "Configuration error.",

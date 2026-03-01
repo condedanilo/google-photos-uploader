@@ -74,3 +74,23 @@ follow_symlinks = false
 # On interrupted runs, the same album is reused (album ID is stored in state).
 # Equivalent to the --album CLI flag. Leave commented out to upload to library root.
 # name = "Bulk Upload 2024"
+
+[video_compression]
+# Transcode videos to H.264/AAC before upload.
+# Requires ffmpeg on PATH (brew install ffmpeg / sudo apt install ffmpeg).
+enabled = true
+
+# Downscale to this height if the video is taller. Set to 0 to skip scaling.
+# Example: 1080 converts 4K → 1080p; 720 converts 1080p → 720p.
+max_height = 1080
+
+# H.264 quality (CRF). Lower = better quality and larger file.
+#   18 = near-lossless, 23 = default, 28 = smaller/noticeable quality loss
+crf = 23
+
+# ffmpeg encoding speed preset. Slower presets = smaller files at same quality.
+# Options: ultrafast, superfast, veryfast, faster, fast, medium, slow, slower, veryslow
+preset = "medium"
+
+# AAC audio bitrate.
+audio_bitrate = "128k"
