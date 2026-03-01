@@ -61,6 +61,43 @@ def _fmt_duration(seconds: float) -> str:
     return f"{h}h {m:02d}m"
 
 
+def _fmt_time_ago(dt_str: str) -> str:
+    """Return 'X ago  (YYYY-MM-DD HH:MM)' from an ISO datetime string."""
+    try:
+        dt = datetime.datetime.fromisoformat(dt_str)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.timezone.utc)
+        now = datetime.datetime.now(tz=datetime.timezone.utc)
+        diff = now - dt
+        total_seconds = int(diff.total_seconds())
+        if total_seconds < 60:
+            ago = "just now"
+        elif total_seconds < 3600:
+            m = total_seconds // 60
+            ago = f"{m} minute{'s' if m != 1 else ''} ago"
+        elif total_seconds < 86400:
+            h = total_seconds // 3600
+            ago = f"{h} hour{'s' if h != 1 else ''} ago"
+        else:
+            d = total_seconds // 86400
+            ago = f"{d} day{'s' if d != 1 else ''} ago"
+        formatted = dt.strftime("%Y-%m-%d %H:%M")
+        return f"{ago}  ({formatted})"
+    except (ValueError, TypeError):
+        return dt_str or "unknown"
+
+
+_EXIT_REASON_LABELS: dict[str, str] = {
+    "completed": "Completed normally",
+    "quota_exhausted": "Google Photos quota exhausted",
+    "user_interrupted": "Interrupted by user (Ctrl+C)",
+    "auth_error": "Authentication error",
+    "disk_full": "Disk full",
+    "unexpected_error": "Unexpected error",
+    "ffmpeg_not_found": "ffmpeg not found",
+}
+
+
 # ---------------------------------------------------------------------------
 # Scan display
 # ---------------------------------------------------------------------------
@@ -333,11 +370,49 @@ def print_credentials_setup_panel(creds_path: Path) -> None:
     )
 
 
-def ask_continue_previous_run() -> bool:
-    """Ask the user whether to continue a previous run."""
-    console.print(
-        "[yellow]A previous upload session was found.[/yellow]"
+def ask_continue_previous_run(stats: RunStats, last_run: Optional[dict]) -> bool:
+    """Ask the user whether to continue a previous run, showing a summary panel."""
+    # --- Build info lines (timing + cause) ---
+    info_lines: list[str] = []
+
+    if last_run:
+        dt_str = last_run.get("finished_at") or last_run.get("started_at")
+        if dt_str:
+            info_lines.append(f"Last activity   [dim]{_fmt_time_ago(dt_str)}[/dim]")
+        reason_key = last_run.get("exit_reason")
+        reason_label = _EXIT_REASON_LABELS.get(reason_key or "", "Unknown (session may have crashed)")
+        color = "red" if reason_key not in ("completed", None) else "dim"
+        info_lines.append(f"Stopped         [{color}]{reason_label}[/{color}]")
+    else:
+        info_lines.append("[dim]No run history recorded.[/dim]")
+
+    # --- Build stats table ---
+    stats_table = Table(show_header=True, header_style="bold", box=None, padding=(0, 2))
+    stats_table.add_column("Uploaded")
+    stats_table.add_column("Skipped")
+    stats_table.add_column("Errors")
+    stats_table.add_column("Remaining")
+    stats_table.add_row(
+        f"[green]{stats.uploaded:,}[/green]",
+        f"{stats.skipped:,}",
+        f"[red]{stats.errors:,}[/red]" if stats.errors else "0",
+        f"[yellow]{stats.remaining:,}[/yellow]",
     )
+
+    # --- Compose panel content ---
+    from rich.console import Group
+    from rich.text import Text as RichText
+
+    info_text = RichText.from_markup("\n".join(info_lines))
+    spacer = RichText("")
+    panel_content = Group(info_text, spacer, stats_table)
+
+    console.print(Panel(
+        panel_content,
+        title="[bold yellow]Previous Session Found[/bold yellow]",
+        border_style="yellow",
+        padding=(0, 1),
+    ))
     response = console.input("Continue from where you left off? [Y/n] ").strip().lower()
     return response in ("", "y", "yes")
 

@@ -97,8 +97,10 @@ def upload(
             raise typer.Exit(1)
 
     # --- 4. Handle previous state ---
-    if state.has_existing_state() and not reset:
-        if yes or ask_continue_previous_run():
+    if state.has_actionable_state() and not reset:
+        prev_stats = state.get_stats()
+        last_run = state.get_last_run()
+        if yes or ask_continue_previous_run(prev_stats, last_run):
             reverted = state.revert_in_progress_to_pending()
             if reverted:
                 console.print(f"[yellow]Reverted {reverted} in-progress file(s) to pending.[/yellow]")
@@ -177,32 +179,40 @@ def upload(
         stats_container.append(stats)
         progress_display.update(stats)
 
+    run_id = state.start_run()
+    exit_reason = "completed"
     interrupted = False
     try:
         final_stats = run_upload(config, state, on_progress, shutdown_event, source_dir=source)
         final_stats.start_time = start_time
     except FfmpegNotFoundError as e:
-        progress_display.stop()
+        exit_reason = "ffmpeg_not_found"
+        interrupted = True
         console.print(f"\n[red]ffmpeg not found:[/red] {e}")
-        state.close()
-        raise typer.Exit(1)
     except QuotaExhaustedError as e:
+        exit_reason = "quota_exhausted"
         interrupted = True
         console.print(f"\n[red bold]Quota exhausted:[/red bold] {human_message(e)}")
     except AuthError as e:
+        exit_reason = "auth_error"
         interrupted = True
         console.print(f"\n[red]Authentication error:[/red] {human_message(e)}")
     except DiskFullError as e:
+        exit_reason = "disk_full"
         interrupted = True
         console.print(f"\n[red]Disk full:[/red] {human_message(e)}")
     except Exception as e:
+        exit_reason = "unexpected_error"
         interrupted = True
         console.print(f"\n[red]Unexpected error:[/red] {e}")
     finally:
         progress_display.stop()
         if shutdown_event.is_set():
             interrupted = True
+            if exit_reason == "completed":
+                exit_reason = "user_interrupted"
             state.revert_in_progress_to_pending()
+        state.finish_run(run_id, exit_reason)
 
     # --- 9. Final report ---
     console.print()

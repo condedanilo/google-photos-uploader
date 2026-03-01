@@ -64,6 +64,9 @@ def scan_directory(
     result = ScanResult()
 
     for path in _walk(root, follow_symlinks=follow_symlinks):
+        if path.name.startswith("._"):
+            result.skipped_count += 1
+            continue
         ext = path.suffix.lower()
         if ext not in allowed:
             result.skipped_count += 1
