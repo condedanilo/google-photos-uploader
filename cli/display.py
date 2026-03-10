@@ -127,7 +127,14 @@ class ScanDisplay:
                 description=f"[green]{count:,}[/green] files found",
             )
 
-    def stop(self, total: int, photos: int = 0, videos: int = 0) -> None:
+    def stop(
+        self,
+        total: int,
+        photos: int = 0,
+        videos: int = 0,
+        total_size_bytes: int = 0,
+        estimated_skipped: int = 0,
+    ) -> None:
         if self._live:
             self._live.stop()
         breakdown = ""
@@ -136,8 +143,15 @@ class ScanDisplay:
                 f" ([cyan]{photos:,}[/cyan] photo{'s' if photos != 1 else ''}"
                 f" · [magenta]{videos:,}[/magenta] video{'s' if videos != 1 else ''})"
             )
+        size_str = f" · [dim]{_fmt_bytes(total_size_bytes)}[/dim]" if total_size_bytes else ""
+        skip_str = (
+            f" · [yellow]~{estimated_skipped:,} already uploaded (estimate)[/yellow]"
+            if estimated_skipped
+            else ""
+        )
         console.print(
-            f"[green]✓[/green] Scan complete — [bold]{total:,}[/bold] files found{breakdown}."
+            f"[green]✓[/green] Scan complete — [bold]{total:,}[/bold] files found"
+            f"{size_str}{skip_str}{breakdown}."
         )
 
 

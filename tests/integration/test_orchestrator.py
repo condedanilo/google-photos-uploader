@@ -85,8 +85,9 @@ class TestScanAndRegister:
         skipped_names = [Path(s.path).name for s in skipped]
         assert "empty.jpg" in skipped_names
 
-    def test_duplicate_hash_marked_skipped(self, store, config, tmp_path):
-        # Create two identical files
+    def test_already_uploaded_path_not_re_queued(self, store, config, tmp_path):
+        # Hashing is deferred to upload time; content-duplicate detection within a batch
+        # is handled by the worker.  The scan phase only checks by path.
         img1 = tmp_path / "img1.jpg"
         img2 = tmp_path / "img2.jpg"
         from tests.conftest import _make_jpeg
@@ -94,15 +95,18 @@ class TestScanAndRegister:
         import shutil
         shutil.copy(img1, img2)
 
-        # Mark img1 as already uploaded
+        # Mark img1 as already uploaded by path
         from uploader.hasher import hash_file
         h = hash_file(img1)
         store.upsert_file(FileRecord(path=str(img1), status=FileStatus.UPLOADED, content_hash=h))
 
-        # scan img2 (same hash)
+        # scan: img1 already uploaded → stays UPLOADED (not re-queued)
+        #       img2 is a new path → registered as PENDING (dedup by hash happens in worker)
         scan_and_register(tmp_path, config, store, lambda n, p: None)
-        skipped = store.get_files_by_status(FileStatus.SKIPPED)
-        assert any("img2.jpg" in s.path for s in skipped)
+
+        assert store.get_file_by_path(str(img1)).status == FileStatus.UPLOADED
+        pending = store.get_pending_files()
+        assert any("img2.jpg" in p.path for p in pending)
 
 
 # ---------------------------------------------------------------------------

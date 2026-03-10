@@ -337,6 +337,13 @@ class StateStore:
         ).fetchone()
         return _row_to_record(row) if row else None
 
+    def get_file_by_path(self, path: str) -> Optional[FileRecord]:
+        """Return the record for a given path, or None if not found."""
+        row = self._conn.execute(
+            "SELECT * FROM files WHERE path = ? LIMIT 1", (path,)
+        ).fetchone()
+        return _row_to_record(row) if row else None
+
     def get_pending_files(self) -> list[FileRecord]:
         """Return all PENDING files in insertion order."""
         rows = self._conn.execute(

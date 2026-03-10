@@ -260,14 +260,18 @@ def scan_and_register(
     config: AppConfig,
     state: StateStore,
     on_file_scanned: Callable[[int, str], None],
-) -> tuple[int, int, int]:
-    """Scan source directory, hash files, and register them in state.
+) -> tuple[int, int, int, int, int]:
+    """Scan source directory and register files in state without hashing.
+
+    Hashing is deferred to upload time so that uploads can begin immediately.
+    Files already uploaded in a previous run are detected by path (fast DB
+    lookup) and counted as estimated skipped.
 
     Handles:
       - 0-byte files → SKIPPED
       - >200 MB files → SKIPPED
-      - Already uploaded (by hash) → SKIPPED
-      - Everything else → PENDING
+      - Already uploaded by path → counted as estimated skipped (not re-queued)
+      - Everything else → PENDING (hash computed later by the worker)
 
     Args:
         source_dir: Root directory to scan.
@@ -277,11 +281,13 @@ def scan_and_register(
             ``on_file_scanned(total_found_so_far, display_path)``.
 
     Returns:
-        Tuple of (total_files, photo_count, video_count).
+        Tuple of (total_files, photo_count, video_count,
+                  estimated_skipped, total_size_bytes).
+        ``estimated_skipped`` is based on path matching and may differ from
+        the exact count shown in the final report.
     """
     from pathlib import Path as _Path
 
-    from uploader.hasher import hash_file_safe
     from uploader.models import MAX_FILE_SIZE_BYTES
     from uploader.scanner import scan_directory
 
@@ -299,7 +305,9 @@ def scan_and_register(
         on_file_found=_on_found,
     )
 
-    # Hash and register
+    estimated_skipped = 0
+    total_size_bytes = 0
+
     for path in scan_result.paths:
         try:
             size = path.stat().st_size
@@ -326,34 +334,30 @@ def scan_and_register(
             ))
             continue
 
-        content_hash, err = hash_file_safe(path)
-        if err or not content_hash:
-            state.upsert_file(FileRecord(
-                path=str(path),
-                status=FileStatus.ERROR,
-                error_msg=f"Cannot hash file: {err}",
-                original_size_bytes=size,
-            ))
+        # Fast path-based check: preserve already-uploaded records and skip re-queuing
+        existing = state.get_file_by_path(str(path))
+        if existing and existing.status == FileStatus.UPLOADED:
+            estimated_skipped += 1
+            total_size_bytes += size
+            continue  # Don't overwrite the uploaded record
+
+        if existing and existing.status == FileStatus.SKIPPED:
+            # Already known-skipped (e.g. dup from previous run) — leave it
             continue
 
-        # Check for duplicate
-        existing = state.get_file_by_hash(content_hash)
-        if existing:
-            state.upsert_file(FileRecord(
-                path=str(path),
-                status=FileStatus.SKIPPED,
-                content_hash=content_hash,
-                error_msg=f"Duplicate of already-uploaded: {existing.path}",
-                original_size_bytes=size,
-                compressed_size_bytes=size,
-            ))
-            continue
-
+        total_size_bytes += size
+        # Register as PENDING without hash; worker computes hash at upload time
         state.upsert_file(FileRecord(
             path=str(path),
             status=FileStatus.PENDING,
-            content_hash=content_hash,
+            content_hash=None,
             original_size_bytes=size,
         ))
 
-    return len(scan_result.paths), scan_result.photo_count, scan_result.video_count
+    return (
+        len(scan_result.paths),
+        scan_result.photo_count,
+        scan_result.video_count,
+        estimated_skipped,
+        total_size_bytes,
+    )
