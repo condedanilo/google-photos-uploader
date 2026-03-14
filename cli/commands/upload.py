@@ -17,6 +17,7 @@ from uploader.errors import (
     DiskFullError,
     FfmpegNotFoundError,
     QuotaExhaustedError,
+    RateLimitError,
     StateCorruptedError,
     human_message,
 )
@@ -195,6 +196,10 @@ def upload(
         exit_reason = "quota_exhausted"
         interrupted = True
         console.print(f"\n[red bold]Quota exhausted:[/red bold] {human_message(e)}")
+    except RateLimitError as e:
+        exit_reason = "rate_limited"
+        interrupted = True
+        console.print(f"\n[red]Rate limited:[/red] {human_message(e)}")
     except AuthError as e:
         exit_reason = "auth_error"
         interrupted = True
