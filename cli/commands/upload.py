@@ -117,16 +117,18 @@ def upload(
     scan_display.start()
 
     try:
-        total_found, photo_count, video_count = scan_and_register(
-            source, config, state,
-            on_file_scanned=scan_display.update,
-        )
+        total_found, photo_count, video_count, estimated_skipped, total_size_bytes = \
+            scan_and_register(source, config, state, on_file_scanned=scan_display.update)
     except PermissionError as e:
         scan_display.stop(0)
         console.print(f"[red]Permission error during scan:[/red] {e}")
         raise typer.Exit(1)
 
-    scan_display.stop(total_found, photo_count, video_count)
+    scan_display.stop(
+        total_found, photo_count, video_count,
+        total_size_bytes=total_size_bytes,
+        estimated_skipped=estimated_skipped,
+    )
 
     if total_found == 0:
         console.print("[yellow]No supported media files found in the specified directory.[/yellow]")
