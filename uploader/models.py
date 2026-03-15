@@ -59,6 +59,8 @@ VIDEO_EXTENSIONS: frozenset[str] = frozenset({
     ".mp4", ".mov", ".avi", ".wmv", ".mkv", ".3gp", ".mpg", ".mpeg",
 })
 
+PHOTO_EXTENSIONS: frozenset[str] = SUPPORTED_EXTENSIONS - VIDEO_EXTENSIONS
+
 MAX_FILE_SIZE_BYTES: int = 200 * 1024 * 1024  # 200 MB — Google Photos hard limit
 
 

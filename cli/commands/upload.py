@@ -42,6 +42,7 @@ def upload(
     album: Annotated[Optional[str], typer.Option("--album", help="Add uploaded photos to this Google Photos album (created if it doesn't exist)")] = None,
     albums_from_dirs: Annotated[bool, typer.Option("--albums-from-dirs", help="Create one Google Photos album per subdirectory (mutually exclusive with --album)")] = False,
     album_prefix: Annotated[Optional[str], typer.Option("--album-prefix", help="Prefix to prepend to every album name created by --albums-from-dirs")] = None,
+    media_type: Annotated[Optional[str], typer.Option("--media-type", help="Filter by media type: photos | videos | all")] = None,
 ) -> None:
     """Bulk upload photos from SOURCE to Google Photos."""
     from cli.display import (
@@ -81,6 +82,7 @@ def upload(
             album=album,
             album_per_dir=albums_from_dirs,
             album_prefix=album_prefix,
+            media_type=media_type,
         )
     except ConfigError as e:
         console.print(f"[red]Configuration error:[/red] {e}")

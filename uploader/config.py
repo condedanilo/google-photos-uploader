@@ -16,7 +16,7 @@ from pathlib import Path
 from typing import Optional
 
 from uploader.errors import ConfigError
-from uploader.models import CompressionLevel
+from uploader.models import PHOTO_EXTENSIONS, VIDEO_EXTENSIONS, CompressionLevel
 
 
 # ---------------------------------------------------------------------------
@@ -223,6 +223,7 @@ def load(
     album: Optional[str] = None,
     album_per_dir: bool = False,
     album_prefix: Optional[str] = None,
+    media_type: Optional[str] = None,
 ) -> AppConfig:
     """Load and merge configuration from all sources, returning an AppConfig."""
 
@@ -262,6 +263,19 @@ def load(
         overrides["album_per_dir"] = True
     if album_prefix is not None:
         overrides["album_prefix"] = album_prefix
+    if media_type is not None:
+        _media_type_map = {
+            "photos": PHOTO_EXTENSIONS,
+            "videos": VIDEO_EXTENSIONS,
+        }
+        if media_type == "all":
+            overrides["include_extensions"] = None
+        elif media_type in _media_type_map:
+            overrides["include_extensions"] = _media_type_map[media_type]
+        else:
+            raise ConfigError(
+                f"Invalid media type '{media_type}'. Choose from: photos, videos, all"
+            )
 
     if overrides:
         cfg = replace(cfg, **overrides)
