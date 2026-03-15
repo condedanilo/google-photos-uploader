@@ -194,6 +194,76 @@ class TestGetStats:
 
 
 # ---------------------------------------------------------------------------
+# Extension filtering (--media-type)
+# ---------------------------------------------------------------------------
+
+class TestExtensionFiltering:
+    """Verify that get_pending_files() and get_stats() respect include_extensions."""
+
+    def test_get_pending_files_filters_by_extension(self, store: StateStore):
+        store.upsert_file(_make_record("/photos/a.jpg"))
+        store.upsert_file(_make_record("/photos/b.png"))
+        store.upsert_file(_make_record("/videos/c.mp4"))
+        store.upsert_file(_make_record("/videos/d.mov"))
+
+        photos_only = frozenset({".jpg", ".png"})
+        pending = store.get_pending_files(include_extensions=photos_only)
+        paths = {r.path for r in pending}
+        assert paths == {"/photos/a.jpg", "/photos/b.png"}
+
+    def test_get_pending_files_no_filter_returns_all(self, store: StateStore):
+        store.upsert_file(_make_record("/a.jpg"))
+        store.upsert_file(_make_record("/b.mp4"))
+
+        pending = store.get_pending_files()
+        assert len(pending) == 2
+
+    def test_get_stats_filters_by_extension(self, store: StateStore):
+        # Mix of photos and videos in various states
+        store.upsert_file(_make_record("/a.jpg"))                          # pending photo
+        store.upsert_file(_make_record("/b.png"))                          # pending photo
+        fid_v = store.upsert_file(_make_record("/c.mp4"))                  # pending video
+        fid_up = store.upsert_file(_make_record("/d.jpg", FileStatus.UPLOADED, "h1"))  # uploaded photo
+
+        # Mark the video as error
+        store.set_status(fid_v, FileStatus.ERROR, error_msg="failed")
+
+        # Without filter: 4 total (2 pending photos + 1 error video + 1 uploaded photo)
+        all_stats = store.get_stats()
+        assert all_stats.total == 4
+        assert all_stats.errors == 1
+
+        # With photos-only filter: should exclude the .mp4
+        photos_only = frozenset({".jpg", ".png"})
+        photo_stats = store.get_stats(include_extensions=photos_only)
+        assert photo_stats.total == 3
+        assert photo_stats.errors == 0
+        assert photo_stats.uploaded == 1
+
+    def test_get_stats_size_filtered_by_extension(self, store: StateStore):
+        fid_photo = store.upsert_file(_make_record("/a.jpg"))
+        store.set_status(fid_photo, FileStatus.UPLOADED, google_media_id="m1",
+                         original_size_bytes=1000, compressed_size_bytes=400)
+        fid_video = store.upsert_file(_make_record("/b.mp4"))
+        store.set_status(fid_video, FileStatus.UPLOADED, google_media_id="m2",
+                         original_size_bytes=5000, compressed_size_bytes=3000)
+
+        photos_only = frozenset({".jpg"})
+        stats = store.get_stats(include_extensions=photos_only)
+        assert stats.total_original_bytes == 1000
+        assert stats.total_compressed_bytes == 400
+
+    def test_extension_filter_case_insensitive(self, store: StateStore):
+        store.upsert_file(_make_record("/photos/A.JPG"))
+        store.upsert_file(_make_record("/photos/b.Jpg"))
+        store.upsert_file(_make_record("/videos/c.MP4"))
+
+        photos_only = frozenset({".jpg"})
+        pending = store.get_pending_files(include_extensions=photos_only)
+        assert len(pending) == 2  # both .JPG and .Jpg should match .jpg
+
+
+# ---------------------------------------------------------------------------
 # Thread safety
 # ---------------------------------------------------------------------------
 

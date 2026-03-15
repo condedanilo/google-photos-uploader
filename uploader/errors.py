@@ -56,6 +56,13 @@ class QuotaExhaustedError(ApiError):
         super().__init__(429, "Daily upload quota exhausted", reason="dailyLimitExceeded")
 
 
+class ConflictError(ApiError):
+    """HTTP 409 — operation was aborted due to a conflict; typically retryable."""
+
+    def __init__(self, message: str = "The operation was aborted"):
+        super().__init__(409, message, reason="ABORTED")
+
+
 class ServerError(ApiError):
     """HTTP 5xx — transient server-side error."""
 
@@ -166,6 +173,7 @@ _HUMAN_MESSAGES: dict[type[UploaderError], str] = {
     StateCorruptedError:  "Upload state database is corrupted. Run with --reset to start over.",
     DiskFullError:        "Local disk is full. Free up space and re-run — progress is preserved.",
     ConfigError:          "Configuration error.",
+    ConflictError:        "Google Photos conflict error — will retry automatically.",
     ServerError:          "Google Photos returned a server error — will retry automatically.",
     ApiError:             "Google Photos API error.",
 }

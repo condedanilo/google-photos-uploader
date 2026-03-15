@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import pytest
 
-from uploader.errors import NetworkError, QuotaExhaustedError, RateLimitError, ServerError
+from uploader.errors import ConflictError, NetworkError, QuotaExhaustedError, RateLimitError, ServerError
 from uploader.retry import with_retry
 
 
@@ -141,3 +141,21 @@ class TestWithRetry:
                 retryable=(NetworkError,), _sleep=lambda _: None,
             )
         assert calls[0] == 1
+
+    def test_conflict_error_is_retried(self):
+        """409 ConflictError should be retried when listed as retryable."""
+        calls = []
+
+        def fn():
+            calls.append(1)
+            if len(calls) < 3:
+                raise ConflictError("The operation was aborted")
+            return "done"
+
+        result = with_retry(
+            fn, max_attempts=5, base_delay=0.0,
+            retryable=(NetworkError, RateLimitError, ServerError, ConflictError),
+            _sleep=lambda _: None,
+        )
+        assert result == "done"
+        assert len(calls) == 3

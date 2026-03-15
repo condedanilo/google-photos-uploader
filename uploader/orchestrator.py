@@ -26,6 +26,7 @@ from uploader.auth import get_credentials
 from uploader.compressor import check_ffmpeg
 from uploader.config import AppConfig
 from uploader.errors import (
+    ConflictError,
     FfmpegNotFoundError,
     NetworkError,
     QuotaExhaustedError,
@@ -40,7 +41,7 @@ from uploader.worker import upload_file
 
 
 # Errors retried on batchCreate
-_BATCH_RETRYABLE = (NetworkError, RateLimitError, ServerError)
+_BATCH_RETRYABLE = (NetworkError, RateLimitError, ServerError, ConflictError)
 _BATCH_NON_RETRYABLE = (QuotaExhaustedError,)
 
 # How long (seconds) to wait for a new token before checking if workers are done
@@ -79,10 +80,10 @@ def run_upload(
     album_id: Optional[str] = None          # used for --album (global)
     dir_album_map: dict[str, str] = {}      # used for --albums-from-dirs
 
-    # Load pending files
-    pending = state.get_pending_files()
+    # Load pending files (filtered by media-type when set)
+    pending = state.get_pending_files(include_extensions=config.include_extensions)
     if not pending:
-        return state.get_stats()
+        return state.get_stats(include_extensions=config.include_extensions)
 
     if config.album:
         # Single global album (existing behaviour)
@@ -190,7 +191,7 @@ def run_upload(
                     progress_event=progress_event,
                 )
 
-        return state.get_stats()
+        return state.get_stats(include_extensions=config.include_extensions)
 
     token_queue: queue.Queue[UploadToken] = queue.Queue()
     progress_event = threading.Event()
@@ -219,7 +220,7 @@ def run_upload(
             progress_event=progress_event,
         )
 
-    return state.get_stats()
+    return state.get_stats(include_extensions=config.include_extensions)
 
 
 # ---------------------------------------------------------------------------
@@ -261,7 +262,7 @@ def _batch_create_loop(
             # Progress event may have fired without new tokens (e.g. SKIPPED/ERROR)
             if progress_event.is_set():
                 progress_event.clear()
-                on_progress(state.get_stats())
+                on_progress(state.get_stats(include_extensions=config.include_extensions))
             continue
 
         if shutdown_event.is_set():
@@ -303,7 +304,7 @@ def _batch_create_loop(
                     )
 
         if quota_error:
-            on_progress(state.get_stats())
+            on_progress(state.get_stats(include_extensions=config.include_extensions))
             return
 
         # Update state for each result
@@ -320,7 +321,7 @@ def _batch_create_loop(
                 )
 
         progress_event.clear()
-        on_progress(state.get_stats())
+        on_progress(state.get_stats(include_extensions=config.include_extensions))
 
 
 # ---------------------------------------------------------------------------

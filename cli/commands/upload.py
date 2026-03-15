@@ -139,10 +139,10 @@ def upload(
         raise typer.Exit(0)
 
     # --- 6. Pre-upload summary ---
-    initial_stats = state.get_stats()
+    initial_stats = state.get_stats(include_extensions=config.include_extensions)
     show_pre_upload_summary(initial_stats, config.workers)
 
-    pending_count = len(state.get_pending_files())
+    pending_count = len(state.get_pending_files(include_extensions=config.include_extensions))
     if pending_count == 0:
         console.print("[green]All files are already uploaded.[/green]")
         state.close()
@@ -225,7 +225,7 @@ def upload(
 
     # --- 9. Final report ---
     console.print()
-    final_stats = state.get_stats()
+    final_stats = state.get_stats(include_extensions=config.include_extensions)
     final_stats.start_time = start_time
     failed_files = state.get_files_by_status(FileStatus.ERROR)
 

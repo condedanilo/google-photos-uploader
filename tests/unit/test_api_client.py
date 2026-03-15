@@ -11,6 +11,7 @@ import respx
 from uploader.api_client import GooglePhotosClient, _ALBUMS_URL, _BATCH_CREATE_URL, _UPLOAD_URL
 from uploader.errors import (
     ApiError,
+    ConflictError,
     NetworkError,
     QuotaExhaustedError,
     RateLimitError,
@@ -75,6 +76,14 @@ class TestUploadBytes:
         respx.post(_UPLOAD_URL).mock(return_value=httpx.Response(503, text="Service unavailable"))
         with pytest.raises(ServerError):
             client.upload_bytes(small_file)
+
+    @respx.mock
+    def test_raises_conflict_error_on_409(self, client, small_file):
+        body = '{"error": {"code": 409, "message": "The operation was aborted.", "status": "ABORTED"}}'
+        respx.post(_UPLOAD_URL).mock(return_value=httpx.Response(409, text=body))
+        with pytest.raises(ConflictError) as exc_info:
+            client.upload_bytes(small_file)
+        assert exc_info.value.status_code == 409
 
     @respx.mock
     def test_raises_api_error_on_4xx(self, client, small_file):
