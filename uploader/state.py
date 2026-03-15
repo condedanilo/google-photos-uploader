@@ -344,10 +344,21 @@ class StateStore:
         ).fetchone()
         return _row_to_record(row) if row else None
 
-    def get_pending_files(self) -> list[FileRecord]:
-        """Return all PENDING files in insertion order."""
+    def get_pending_files(
+        self,
+        include_extensions: Optional[frozenset[str]] = None,
+    ) -> list[FileRecord]:
+        """Return all PENDING files in insertion order.
+
+        Args:
+            include_extensions: If provided, only return files whose path ends
+                with one of these extensions (e.g. ``frozenset({".jpg", ".png"})``).
+                This prevents stale records from a previous run (with a different
+                ``--media-type``) from being picked up.
+        """
+        where, params = self._extension_filter(include_extensions, extra_cond="status = 'pending'")
         rows = self._conn.execute(
-            "SELECT * FROM files WHERE status = 'pending' ORDER BY id"
+            f"SELECT * FROM files {where} ORDER BY id", params
         ).fetchall()
         return [_row_to_record(r) for r in rows]
 
@@ -358,29 +369,75 @@ class StateStore:
         ).fetchall()
         return [_row_to_record(r) for r in rows]
 
-    def get_stats(self) -> RunStats:
-        """Aggregate counts and size totals from the database."""
+    # ------------------------------------------------------------------
+    # Extension filtering helper
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _extension_filter(
+        include_extensions: Optional[frozenset[str]] = None,
+        extra_cond: Optional[str] = None,
+    ) -> tuple[str, list[str]]:
+        """Build a SQL WHERE clause that restricts rows to matching file extensions.
+
+        Returns ``("WHERE ...", [params...])`` or ``("", [])`` when no filter
+        is needed.  *extra_cond* (e.g. ``"status = 'pending'"``) is AND-combined.
+        """
+        parts: list[str] = []
+        params: list[str] = []
+
+        if extra_cond:
+            parts.append(extra_cond)
+
+        if include_extensions:
+            # Build: (lower(path) LIKE ? OR lower(path) LIKE ? ...)
+            like_clauses = []
+            for ext in sorted(include_extensions):
+                like_clauses.append("lower(path) LIKE ?")
+                params.append(f"%{ext.lower()}")
+            parts.append(f"({' OR '.join(like_clauses)})")
+
+        if parts:
+            return f"WHERE {' AND '.join(parts)}", params
+        return "", params
+
+    def get_stats(
+        self,
+        include_extensions: Optional[frozenset[str]] = None,
+    ) -> RunStats:
+        """Aggregate counts and size totals from the database.
+
+        Args:
+            include_extensions: If provided, only count files whose path ends
+                with one of these extensions.  Keeps stats consistent with the
+                ``--media-type`` flag used at scan time.
+        """
+        ext_where, ext_params = self._extension_filter(include_extensions)
+
         # Status counts
         counts: dict[str, int] = {}
         for row in self._conn.execute(
-            "SELECT status, COUNT(*) as cnt FROM files GROUP BY status"
+            f"SELECT status, COUNT(*) as cnt FROM files {ext_where} GROUP BY status",
+            ext_params,
         ):
             counts[row["status"]] = row["cnt"]
 
         total = sum(counts.values())
 
         # Size aggregates (only for processed files)
+        size_cond = "status IN ('uploaded', 'error', 'skipped') AND original_size_bytes IS NOT NULL"
+        size_where, size_params = self._extension_filter(include_extensions, extra_cond=size_cond)
         size_row = self._conn.execute(
-            """
+            f"""
             SELECT
                 COALESCE(SUM(original_size_bytes), 0)   AS orig,
                 COALESCE(SUM(
                     COALESCE(compressed_size_bytes, original_size_bytes)
                 ), 0) AS comp
             FROM files
-            WHERE status IN ('uploaded', 'error', 'skipped')
-              AND original_size_bytes IS NOT NULL
-            """
+            {size_where}
+            """,
+            size_params,
         ).fetchone()
 
         # Per-type counts (video extensions identified by file path)
@@ -398,8 +455,10 @@ class StateStore:
                 CASE WHEN {_VIDEO_LIKE} THEN 'video' ELSE 'photo' END AS media_type,
                 COUNT(*) AS cnt
             FROM files
+            {ext_where}
             GROUP BY status, media_type
-            """
+            """,
+            ext_params,
         ):
             type_counts[(row["status"], row["media_type"])] = row["cnt"]
 

@@ -22,6 +22,7 @@ import httpx  # type: ignore
 
 from uploader.errors import (
     ApiError,
+    ConflictError,
     NetworkError,
     QuotaExhaustedError,
     RateLimitError,
@@ -264,6 +265,9 @@ def _raise_for_status(response: httpx.Response) -> None:
             except ValueError:
                 pass
         raise RateLimitError(retry_after=retry_after)
+
+    if status == 409:
+        raise ConflictError(f"API error 409: {response.text[:200]}")
 
     if 500 <= status < 600:
         raise ServerError(status, f"Server error: {response.text[:200]}")
