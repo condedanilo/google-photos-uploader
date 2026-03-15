@@ -13,7 +13,7 @@ from uploader.config import (
     load,
 )
 from uploader.errors import ConfigError
-from uploader.models import CompressionLevel
+from uploader.models import PHOTO_EXTENSIONS, VIDEO_EXTENSIONS, CompressionLevel
 
 
 # ---------------------------------------------------------------------------
@@ -165,3 +165,48 @@ class TestLoad:
         cfg = load(config_file=cfg_file)
 
         assert cfg.include_extensions == frozenset({".jpg", ".PNG"})
+
+
+# ---------------------------------------------------------------------------
+# load() — --media-type option
+# ---------------------------------------------------------------------------
+
+class TestMediaType:
+    def test_photos_sets_photo_extensions(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("uploader.config.USER_CONFIG_PATH", tmp_path / "none.toml")
+        monkeypatch.chdir(tmp_path)
+
+        cfg = load(media_type="photos")
+
+        assert cfg.include_extensions == PHOTO_EXTENSIONS
+
+    def test_videos_sets_video_extensions(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("uploader.config.USER_CONFIG_PATH", tmp_path / "none.toml")
+        monkeypatch.chdir(tmp_path)
+
+        cfg = load(media_type="videos")
+
+        assert cfg.include_extensions == VIDEO_EXTENSIONS
+
+    def test_all_leaves_extensions_none(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("uploader.config.USER_CONFIG_PATH", tmp_path / "none.toml")
+        monkeypatch.chdir(tmp_path)
+
+        cfg = load(media_type="all")
+
+        assert cfg.include_extensions is None
+
+    def test_invalid_value_raises(self, tmp_path, monkeypatch):
+        monkeypatch.setattr("uploader.config.USER_CONFIG_PATH", tmp_path / "none.toml")
+        monkeypatch.chdir(tmp_path)
+
+        with pytest.raises(ConfigError, match="Invalid media type"):
+            load(media_type="gifs")
+
+    def test_media_type_overrides_toml_extensions(self, tmp_path):
+        cfg_file = tmp_path / "cfg.toml"
+        cfg_file.write_text('[scan]\ninclude_extensions = [".jpg"]\n')
+
+        cfg = load(config_file=cfg_file, media_type="videos")
+
+        assert cfg.include_extensions == VIDEO_EXTENSIONS

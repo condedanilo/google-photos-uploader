@@ -201,6 +201,18 @@ gphotos upload /path/to/photos --reset
 
 # Group uploaded photos into a named album (created automatically if it doesn't exist)
 gphotos upload /path/to/photos --album "Hawaii 2024"
+
+# Create one album per subdirectory (e.g. Photos/Trip1/, Photos/Trip2/ → two albums)
+gphotos upload /path/to/photos --albums-from-dirs
+
+# Same as above, but prefix every album name
+gphotos upload /path/to/photos --albums-from-dirs --album-prefix "BACKUP:"
+
+# Upload only photos (skip videos)
+gphotos upload /path/to/photos --media-type photos
+
+# Upload only videos (skip photos)
+gphotos upload /path/to/photos --media-type videos
 ```
 
 ### Check auth status

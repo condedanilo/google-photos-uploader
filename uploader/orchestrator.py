@@ -12,6 +12,7 @@ The batchCreate loop runs on the calling thread. It exits when:
 """
 from __future__ import annotations
 
+import logging
 import queue
 import threading
 import time
@@ -87,53 +88,126 @@ def run_upload(
         # Single global album (existing behaviour)
         album_id = state.get_meta("album_id")
         if not album_id:
-            album_id = client.get_or_create_album(config.album)
+            album_id = with_retry(
+                lambda: client.get_or_create_album(config.album),
+                max_attempts=config.max_retries,
+                base_delay=config.retry_base_delay,
+                retryable=_BATCH_RETRYABLE,
+                non_retryable=_BATCH_NON_RETRYABLE,
+            )
             state.set_meta("album_id", album_id)
 
     elif config.album_per_dir and source_dir is not None:
-        # Pre-create one album per unique immediate parent directory
-        unique_dirs: set[str] = set()
+        # Process one directory at a time: create album → upload its files → next.
+        # This naturally spaces album-creation API calls apart, avoiding 429s.
+        logger = logging.getLogger(__name__)
+
+        # Group pending files by parent directory name
+        dir_groups: dict[str, list[FileRecord]] = defaultdict(list)
+        root_files: list[FileRecord] = []
         for record in pending:
             parent = Path(record.path).parent
             try:
                 rel = parent.relative_to(source_dir)
             except ValueError:
+                root_files.append(record)
                 continue
-            if str(rel) != ".":
-                unique_dirs.add(parent.name)
+            if str(rel) == ".":
+                root_files.append(record)
+            else:
+                dir_groups[parent.name].append(record)
 
-        for dir_name in sorted(unique_dirs):
-            album_name = f"{config.album_prefix} {dir_name}" if config.album_prefix else dir_name
-            meta_key = f"album_id_dir:{dir_name}"
-            stored_id = state.get_meta(meta_key)
-            if not stored_id:
-                stored_id = client.get_or_create_album(album_name)
-                state.set_meta(meta_key, stored_id)
-            dir_album_map[dir_name] = stored_id
+        sorted_dirs = sorted(dir_groups.keys())
+        token_queue: queue.Queue[UploadToken] = queue.Queue()
+        progress_event = threading.Event()
+
+        with ThreadPoolExecutor(max_workers=config.workers) as executor:
+            for i, dir_name in enumerate(sorted_dirs, 1):
+                if shutdown_event.is_set():
+                    break
+
+                # Create/get album for this directory
+                album_name = f"{config.album_prefix} {dir_name}" if config.album_prefix else dir_name
+                meta_key = f"album_id_dir:{dir_name}"
+                dir_album_id = state.get_meta(meta_key)
+                if not dir_album_id:
+                    logger.debug("Creating album %d/%d '%s'", i, len(sorted_dirs), album_name)
+                    dir_album_id = with_retry(
+                        lambda name=album_name: client.get_or_create_album(name),
+                        max_attempts=config.max_retries,
+                        base_delay=config.retry_base_delay,
+                        retryable=_BATCH_RETRYABLE,
+                        non_retryable=_BATCH_NON_RETRYABLE,
+                    )
+                    state.set_meta(meta_key, dir_album_id)
+                else:
+                    logger.debug("Album %d/%d '%s' already cached", i, len(sorted_dirs), album_name)
+
+                # Submit this directory's files and drain
+                futures: list[Future] = []
+                for record in dir_groups[dir_name]:
+                    if shutdown_event.is_set():
+                        break
+                    futures.append(executor.submit(
+                        upload_file,
+                        record, config, client, state,
+                        token_queue, shutdown_event, progress_event,
+                        album_id=dir_album_id,
+                    ))
+
+                _batch_create_loop(
+                    futures=futures,
+                    token_queue=token_queue,
+                    client=client,
+                    state=state,
+                    config=config,
+                    on_progress=on_progress,
+                    shutdown_event=shutdown_event,
+                    progress_event=progress_event,
+                )
+
+            # Upload root-level files (no album)
+            if root_files and not shutdown_event.is_set():
+                futures = []
+                for record in root_files:
+                    if shutdown_event.is_set():
+                        break
+                    futures.append(executor.submit(
+                        upload_file,
+                        record, config, client, state,
+                        token_queue, shutdown_event, progress_event,
+                        album_id=None,
+                    ))
+
+                _batch_create_loop(
+                    futures=futures,
+                    token_queue=token_queue,
+                    client=client,
+                    state=state,
+                    config=config,
+                    on_progress=on_progress,
+                    shutdown_event=shutdown_event,
+                    progress_event=progress_event,
+                )
+
+        return state.get_stats()
 
     token_queue: queue.Queue[UploadToken] = queue.Queue()
     progress_event = threading.Event()
     futures: list[Future] = []
 
     with ThreadPoolExecutor(max_workers=config.workers) as executor:
-        # Submit all pending files
         for record in pending:
             if shutdown_event.is_set():
                 break
-            # Determine which album this file belongs to
-            if config.album_per_dir and source_dir is not None:
-                file_album_id = dir_album_map.get(Path(record.path).parent.name)
-            else:
-                file_album_id = album_id
             future = executor.submit(
                 upload_file,
                 record, config, client, state,
                 token_queue, shutdown_event, progress_event,
-                album_id=file_album_id,
+                album_id=album_id,
             )
             futures.append(future)
 
-        # batchCreate loop — runs on main thread
         _batch_create_loop(
             futures=futures,
             token_queue=token_queue,
@@ -144,8 +218,6 @@ def run_upload(
             shutdown_event=shutdown_event,
             progress_event=progress_event,
         )
-
-        # Wait for all workers to finish (executor.__exit__ calls shutdown(wait=True))
 
     return state.get_stats()
 
